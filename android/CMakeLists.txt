@@ -170,7 +170,7 @@ target_compile_definitions(te4deps PUBLIC
     HAVE_UNISTD_H
     HAVE_MEMMOVE
 )
-target_link_libraries(te4deps PUBLIC SDL2 SDL2_ttf)
+target_link_libraries(te4deps PUBLIC SDL2 SDL2_ttf SDL2_image)
 
 add_library(main SHARED
     ${TE4_CORE_SOURCES}
