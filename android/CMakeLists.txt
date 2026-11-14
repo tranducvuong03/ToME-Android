@@ -51,6 +51,7 @@ FetchContent_Declare(SDL2_image
 )
 FetchContent_MakeAvailable(SDL2_image)
 target_include_directories(SDL2_image PRIVATE "${sdl2_image_BINARY_DIR}/external/libpng")
+set_property(TARGET zlib PROPERTY EXCLUDE_FROM_ALL TRUE)
 
 set(SDL2TTF_VENDORED ON CACHE BOOL "" FORCE)
 set(SDL2TTF_INSTALL OFF CACHE BOOL "" FORCE)
