@@ -621,6 +621,10 @@ static int lua_stdout_write(lua_State *L)
 
 static int lua_open_browser(lua_State *L)
 {
+#if defined(SELFEXE_ANDROID)
+	(void)L;
+	return 0;
+#else
 #if defined(SELFEXE_LINUX) || defined(SELFEXE_BSD)
 	const char *command = "xdg-open \"%s\"";
 #elif defined(SELFEXE_WINDOWS)
@@ -639,6 +643,7 @@ static int lua_open_browser(lua_State *L)
 	lua_pushboolean(L, system(buf) == 0);
 	
 	return 1;
+#endif
 }
 
 static const struct luaL_Reg gamelib[] =
