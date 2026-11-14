@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <SDL.h>
 
 static void pushKeyEvent(Uint32 type, SDL_Keycode keycode)
@@ -40,4 +41,22 @@ Java_org_te4_android_TE4Activity_nativeSetTextInput(JNIEnv *env, jclass type, jb
 
 	if (enabled) SDL_StartTextInput();
 	else SDL_StopTextInput();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_org_te4_android_TE4Activity_nativeRedirectLog(JNIEnv *env, jclass type, jint fd)
+{
+	(void)env;
+	(void)type;
+	if (fd < 0) return JNI_FALSE;
+
+	fflush(stdout);
+	fflush(stderr);
+	if (dup2(fd, STDOUT_FILENO) < 0 || dup2(fd, STDERR_FILENO) < 0)
+		return JNI_FALSE;
+	if (setvbuf(stdout, NULL, _IONBF, 0) != 0
+		|| setvbuf(stderr, NULL, _IONBF, 0) != 0)
+		return JNI_FALSE;
+
+	return JNI_TRUE;
 }

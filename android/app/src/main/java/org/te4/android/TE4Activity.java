@@ -1,9 +1,18 @@
 package org.te4.android;
 
+import android.content.ContentUris;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.database.Cursor;
 import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.ParcelFileDescriptor;
+import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -27,6 +36,15 @@ public final class TE4Activity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        ParcelFileDescriptor logFile = null;
+        try {
+            logFile = openPublicLogFile();
+        } catch (IOException e) {
+            Log.e("TE4", "Could not create public game log", e);
+        } catch (SecurityException e) {
+            Log.e("TE4", "Could not access public game log", e);
+        }
+
         if (!new File(getFilesDir(), ".te4-data-installed").isFile()) {
             File errorMarker = new File(getFilesDir(), ".te4-data-install-error");
             if (errorMarker.exists() && !errorMarker.delete()) {
@@ -40,6 +58,21 @@ public final class TE4Activity extends SDLActivity {
             }, "TE4 game data installer").start();
         }
         super.onCreate(savedInstanceState);
+        if (logFile != null) {
+            try {
+                if (!nativeRedirectLog(logFile.getFd())) {
+                    Log.e("TE4", "Could not redirect native output to the public game log");
+                } else {
+                    Log.i("TE4", "Native log: Download/Tales of Maj'Eyal/te4_log.txt");
+                }
+            } finally {
+                try {
+                    logFile.close();
+                } catch (IOException e) {
+                    Log.e("TE4", "Could not close the public game log descriptor", e);
+                }
+            }
+        }
         createTouchControls();
         if (!new File(getFilesDir(), ".te4-data-installed").isFile()) {
             installStatus = makeControl("Preparing game data…");
@@ -56,6 +89,49 @@ public final class TE4Activity extends SDLActivity {
 
     private static native void nativeSendKey(int keycode);
     private static native void nativeSetTextInput(boolean enabled);
+    private static native boolean nativeRedirectLog(int fd);
+
+    private ParcelFileDescriptor openPublicLogFile() throws IOException {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Log.w("TE4", "Public game logs require Android 10 or later");
+            return null;
+        }
+
+        ContentResolver resolver = getContentResolver();
+        Uri downloads = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        String displayName = "te4_log.txt";
+        String relativePath = Environment.DIRECTORY_DOWNLOADS + "/Tales of Maj'Eyal/";
+        String selection = MediaStore.MediaColumns.DISPLAY_NAME + "=? AND "
+                + MediaStore.MediaColumns.RELATIVE_PATH + "=?";
+        String[] selectionArgs = { displayName, relativePath };
+        Uri logUri = null;
+
+        try (Cursor cursor = resolver.query(downloads,
+                new String[] { MediaStore.MediaColumns._ID },
+                selection, selectionArgs, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                long id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID));
+                logUri = ContentUris.withAppendedId(downloads, id);
+            }
+        }
+
+        if (logUri == null) {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, displayName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
+            logUri = resolver.insert(downloads, values);
+        }
+        if (logUri == null) {
+            throw new IOException("MediaStore did not create the public game log");
+        }
+
+        ParcelFileDescriptor descriptor = resolver.openFileDescriptor(logUri, "rwt");
+        if (descriptor == null) {
+            throw new IOException("MediaStore did not open the public game log");
+        }
+        return descriptor;
+    }
 
     private void createTouchControls() {
         int height = dp(48);
