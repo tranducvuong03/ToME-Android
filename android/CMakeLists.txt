@@ -30,6 +30,9 @@ set(SDL2IMAGE_VENDORED ON CACHE BOOL "" FORCE)
 set(SDL2IMAGE_INSTALL OFF CACHE BOOL "" FORCE)
 set(SDL2IMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL2IMAGE_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL2IMAGE_BACKEND_STB OFF CACHE BOOL "" FORCE)
+set(SDL2IMAGE_PNG ON CACHE BOOL "" FORCE)
+set(SDL2IMAGE_PNG_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL2IMAGE_AVIF OFF CACHE BOOL "" FORCE)
 set(SDL2IMAGE_JPG OFF CACHE BOOL "" FORCE)
 set(SDL2IMAGE_TIF OFF CACHE BOOL "" FORCE)
@@ -37,6 +40,8 @@ set(SDL2IMAGE_WEBP OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(SDL2_image
     GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
     GIT_TAG release-2.8.2
+    GIT_SUBMODULES external/libpng external/zlib
+    GIT_SUBMODULES_RECURSE TRUE
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(SDL2_image)
@@ -129,7 +134,6 @@ file(GLOB TE4_PHYSFS_SOURCES CONFIGURE_DEPENDS
     "${TE4_SRC}/physfs/archivers/*.c"
     "${TE4_SRC}/physfs/platform/unix.c"
     "${TE4_SRC}/physfs/platform/posix.c"
-    "${TE4_SRC}/zlib/*.c"
 )
 
 add_library(te4deps STATIC
@@ -170,7 +174,7 @@ target_compile_definitions(te4deps PUBLIC
     HAVE_UNISTD_H
     HAVE_MEMMOVE
 )
-target_link_libraries(te4deps PUBLIC SDL2 SDL2_ttf SDL2_image)
+target_link_libraries(te4deps PUBLIC SDL2 SDL2_ttf SDL2_image zlibstatic)
 
 add_library(main SHARED
     ${TE4_CORE_SOURCES}
@@ -205,6 +209,7 @@ target_link_libraries(main PRIVATE
     SDL2_image
     SDL2_ttf
     OpenAL
+    PNG::PNG
     vorbisfile
     vorbis
     ogg

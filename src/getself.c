@@ -19,6 +19,7 @@
     darkgod@te4.org
 */
 #include "getself.h"
+#include <stddef.h>
 
 #if defined(SELFEXE_LINUX)
 #include <limits.h>
