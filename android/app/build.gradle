@@ -20,6 +20,7 @@ android {
         }
         externalNativeBuild {
             cmake {
+                targets "main"
                 arguments "-DTE4_ROOT=${engineRoot.absolutePath}",
                     "-DSDL2_SOURCE_DIR=${file('../SDL').absolutePath}"
                 cppFlags "-std=c++11"
