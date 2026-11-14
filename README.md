@@ -11,6 +11,10 @@ push a change to one of the paths watched by the workflow.
 Large game archives are stored with Git LFS. Install Git LFS before cloning so
 the game data is available locally.
 
+On Android 10 and newer, native output is written to
+`Download/Tales of Maj'Eyal/te4_log.txt`. The log is replaced on each launch.
+Game data remains in the app's private storage.
+
 ## Licensing
 
 The engine and port code use GPL-3.0-only; see [LICENSE](LICENSE). Game content
