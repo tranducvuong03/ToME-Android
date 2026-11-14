@@ -207,7 +207,7 @@ target_include_directories(main PRIVATE
 target_compile_definitions(main PRIVATE
     GLEW_STATIC
     TE4CORE_VERSION=17
-    TENGINE_HOME_PATH='".t-engine"'
+    TENGINE_HOME_PATH=\".t-engine\"
     SELFEXE_ANDROID
 )
 target_compile_options(main PRIVATE -Wno-deprecated-declarations -Wno-unused-function)
