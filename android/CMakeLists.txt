@@ -50,6 +50,7 @@ FetchContent_Declare(SDL2_image
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(SDL2_image)
+target_include_directories(SDL2_image PRIVATE "${sdl2_image_BINARY_DIR}/external/libpng")
 
 set(SDL2TTF_VENDORED ON CACHE BOOL "" FORCE)
 set(SDL2TTF_INSTALL OFF CACHE BOOL "" FORCE)
@@ -199,6 +200,8 @@ target_include_directories(main PRIVATE
     "${TE4_SRC}/bzip2"
     "${TE4_SRC}/wfc"
     "${TE4_SRC}/utf8proc"
+    "${sdl2_image_SOURCE_DIR}/external/libpng"
+    "${sdl2_image_BINARY_DIR}/external/libpng"
     "${FETCHCONTENT_BASE_DIR}/gl4es-src/include"
 )
 target_compile_definitions(main PRIVATE
