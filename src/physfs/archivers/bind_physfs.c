@@ -195,11 +195,11 @@ static PHYSFS_sint64 BIND_PHYSFS_getLastModTime(dvoid *opaque,
 
 
 static fvoid *doOpen(dvoid *opaque, const char *name,
-                     void *(*openFunc)(const char *filename),
+                     PHYSFS_File *(*openFunc)(const char *filename),
                      int *fileExists)
 {
     char *f = __BIND_PHYSFS_toDependent((char *) opaque, name, NULL);
-    void *rc = NULL;
+    PHYSFS_File *rc = NULL;
 
     BAIL_IF_MACRO(f == NULL, NULL, NULL);
 
