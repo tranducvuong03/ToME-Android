@@ -22,10 +22,10 @@
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
-#include "lua_externs.h"
 #include "core_lua.h"
 #include "auxiliar.h"
 #include "types.h"
+#include "lua_externs.h"
 #include "core_lua.h"
 #include <setjmp.h>
 #include "particles.h"
