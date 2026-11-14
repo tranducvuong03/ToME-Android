@@ -140,6 +140,8 @@ file(GLOB TE4_PHYSFS_SOURCES CONFIGURE_DEPENDS
     "${TE4_SRC}/physfs/archivers/*.c"
     "${TE4_SRC}/physfs/platform/unix.c"
     "${TE4_SRC}/physfs/platform/posix.c"
+    "${TE4_SRC}/zlib/mzip.c"
+    "${TE4_SRC}/zlib/ioapi.c"
 )
 
 add_library(te4deps STATIC
