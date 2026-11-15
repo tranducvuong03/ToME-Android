@@ -59,7 +59,7 @@ public final class TE4Activity extends SDLActivity {
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
-    private JoystickView joystick;
+    private DirectionPadView directionPad;
     private View barToggle;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
     private boolean textInputEnabled = true;
@@ -121,6 +121,11 @@ public final class TE4Activity extends SDLActivity {
     @Override
     protected String[] getLibraries() {
         return new String[] { "SDL2", "main" };
+    }
+
+    @Override
+    public void setOrientationBis(int width, int height, boolean resizable, String hint) {
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
     }
 
     private static native void nativeSendKey(int keycode);
@@ -192,12 +197,12 @@ public final class TE4Activity extends SDLActivity {
         barLayout.bottomMargin = dp(5);
         addContentView(shortcutBar, barLayout);
 
-        joystick = new JoystickView(this);
-        FrameLayout.LayoutParams joystickLayout = new FrameLayout.LayoutParams(
-                dp(136), dp(136), Gravity.BOTTOM | Gravity.START);
-        joystickLayout.leftMargin = dp(5);
-        joystickLayout.bottomMargin = dp(3);
-        addContentView(joystick, joystickLayout);
+        directionPad = new DirectionPadView(this);
+        FrameLayout.LayoutParams directionPadLayout = new FrameLayout.LayoutParams(
+                dp(144), dp(144), Gravity.BOTTOM | Gravity.START);
+        directionPadLayout.leftMargin = dp(5);
+        directionPadLayout.bottomMargin = dp(3);
+        addContentView(directionPad, directionPadLayout);
 
         barToggle = makeControl("BAR");
         barToggle.setOnClickListener(new View.OnClickListener() {
@@ -245,7 +250,7 @@ public final class TE4Activity extends SDLActivity {
 
     private boolean isTouchControlAt(float screenX, float screenY) {
         return isInsideView(shortcutBar, screenX, screenY)
-                || isInsideView(joystick, screenX, screenY)
+                || isInsideView(directionPad, screenX, screenY)
                 || isInsideView(barToggle, screenX, screenY)
                 || isInsideView(installStatus, screenX, screenY);
     }
@@ -456,15 +461,23 @@ public final class TE4Activity extends SDLActivity {
         }
     }
 
-    private static final class JoystickView extends View {
+    private static final class DirectionPadView extends View {
         private static final int NO_KEY = -1;
         private static final int REPEAT_DELAY_MS = 170;
+        private static final String[][] DIRECTIONS = {
+                { "↖", "↑", "↗" },
+                { "←", "", "→" },
+                { "↙", "↓", "↘" }
+        };
+        private static final int[][] KEYCODES = {
+                { SDLK_KP_7, SDLK_UP, SDLK_KP_9 },
+                { SDLK_LEFT, NO_KEY, SDLK_RIGHT },
+                { SDLK_KP_1, SDLK_DOWN, SDLK_KP_3 }
+        };
 
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Handler handler = new Handler(Looper.getMainLooper());
         private int activeKeycode = NO_KEY;
-        private float knobX;
-        private float knobY;
 
         private final Runnable repeatKey = new Runnable() {
             @Override
@@ -476,33 +489,48 @@ public final class TE4Activity extends SDLActivity {
             }
         };
 
-        JoystickView(TE4Activity context) {
+        DirectionPadView(TE4Activity context) {
             super(context);
             setClickable(true);
-            setContentDescription("Eight-direction joystick");
+            setContentDescription("Eight-direction pad");
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            float centerX = getWidth() / 2f;
-            float centerY = getHeight() / 2f;
-            float radius = Math.min(getWidth(), getHeight()) * 0.44f;
-            float knobRadius = radius * 0.38f;
+            float cellWidth = getWidth() / 3f;
+            float cellHeight = getHeight() / 3f;
+            float gap = dp(2);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTextSize(dp(24));
+            paint.setTypeface(Typeface.DEFAULT_BOLD);
 
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0x66303030);
-            canvas.drawCircle(centerX, centerY, radius, paint);
+            for (int row = 0; row < 3; row++) {
+                for (int column = 0; column < 3; column++) {
+                    int keycode = KEYCODES[row][column];
+                    if (keycode == NO_KEY) continue;
 
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(2));
-            paint.setColor(0x88FFFFFF);
-            canvas.drawCircle(centerX, centerY, radius, paint);
+                    float left = column * cellWidth + gap;
+                    float top = row * cellHeight + gap;
+                    float right = (column + 1) * cellWidth - gap;
+                    float bottom = (row + 1) * cellHeight - gap;
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(keycode == activeKeycode ? 0xCC777777 : 0x88707070);
+                    canvas.drawRoundRect(left, top, right, bottom, dp(5), dp(5), paint);
 
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(activeKeycode == NO_KEY ? 0x99DDDDDD : 0xCCFFFFFF);
-            canvas.drawCircle(knobX == 0 && knobY == 0 ? centerX : knobX,
-                    knobX == 0 && knobY == 0 ? centerY : knobY, knobRadius, paint);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth(dp(1));
+                    paint.setColor(0x99FFFFFF);
+                    canvas.drawRoundRect(left, top, right, bottom, dp(5), dp(5), paint);
+
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(Color.WHITE);
+                    float textY = (top + bottom) / 2f
+                            - (paint.ascent() + paint.descent()) / 2f;
+                    canvas.drawText(DIRECTIONS[row][column],
+                            (left + right) / 2f, textY, paint);
+                }
+            }
         }
 
         @Override
@@ -529,36 +557,10 @@ public final class TE4Activity extends SDLActivity {
         }
 
         private void updateDirection(float x, float y) {
-            float centerX = getWidth() / 2f;
-            float centerY = getHeight() / 2f;
-            float radius = Math.min(getWidth(), getHeight()) * 0.44f;
-            float dx = x - centerX;
-            float dy = y - centerY;
-            float distance = (float) Math.hypot(dx, dy);
-            float maxKnobOffset = radius * 0.58f;
-            if (distance > maxKnobOffset) {
-                dx = dx * maxKnobOffset / distance;
-                dy = dy * maxKnobOffset / distance;
-                distance = maxKnobOffset;
-            }
-            knobX = centerX + dx;
-            knobY = centerY + dy;
-
-            int nextKeycode = NO_KEY;
-            if (distance > radius * 0.22f) {
-                int sector = Math.round((float) (Math.atan2(dy, dx) / (Math.PI / 4)));
-                switch ((sector + 8) % 8) {
-                    case 0: nextKeycode = SDLK_RIGHT; break;
-                    case 1: nextKeycode = SDLK_KP_3; break;
-                    case 2: nextKeycode = SDLK_DOWN; break;
-                    case 3: nextKeycode = SDLK_KP_1; break;
-                    case 4: nextKeycode = SDLK_LEFT; break;
-                    case 5: nextKeycode = SDLK_KP_7; break;
-                    case 6: nextKeycode = SDLK_UP; break;
-                    case 7: nextKeycode = SDLK_KP_9; break;
-                }
-            }
-
+            if (getWidth() == 0 || getHeight() == 0) return;
+            int column = Math.max(0, Math.min(2, (int) (x * 3 / getWidth())));
+            int row = Math.max(0, Math.min(2, (int) (y * 3 / getHeight())));
+            int nextKeycode = KEYCODES[row][column];
             if (nextKeycode != activeKeycode) {
                 handler.removeCallbacks(repeatKey);
                 activeKeycode = nextKeycode;
@@ -573,8 +575,6 @@ public final class TE4Activity extends SDLActivity {
         private void releaseDirection() {
             handler.removeCallbacks(repeatKey);
             activeKeycode = NO_KEY;
-            knobX = 0;
-            knobY = 0;
             invalidate();
         }
 
