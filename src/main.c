@@ -100,6 +100,32 @@ int mousex = 0, mousey = 0;
 float gamma_correction = 1;
 int cur_frame_tick = 0;
 int frame_tick_paused_time = 0;
+
+#ifdef __ANDROID__
+extern void TE4AndroidUpdatePointerPosition(int x, int y);
+
+static void updateAndroidPointerFromTouch(float x, float y)
+{
+	int width, height;
+	int pixelX, pixelY;
+
+	if (!window) return;
+	SDL_GetWindowSize(window, &width, &height);
+	if (width <= 0 || height <= 0) return;
+
+	pixelX = (int)(x * width);
+	pixelY = (int)(y * height);
+	if (pixelX < 0) pixelX = 0;
+	else if (pixelX >= width) pixelX = width - 1;
+	if (pixelY < 0) pixelY = 0;
+	else if (pixelY >= height) pixelY = height - 1;
+
+	mousex = pixelX / screen_zoom;
+	mousey = pixelY / screen_zoom;
+	TE4AndroidUpdatePointerPosition(pixelX, pixelY);
+}
+#endif
+
 /* The currently requested fps for the program */
 int requested_fps = 30;
 /* The requested fps for when the program is idle (i.e., doesn't have focus) */
@@ -410,6 +436,9 @@ bool on_event(SDL_Event *event)
 		return TRUE;
 	case SDL_MOUSEBUTTONDOWN:
 	case SDL_MOUSEBUTTONUP:
+#ifdef __ANDROID__
+		TE4AndroidUpdatePointerPosition(event->button.x, event->button.y);
+#endif
 		if (event->type == SDL_MOUSEBUTTONDOWN) SDL_SetCursor(mouse_cursor_down);
 		else SDL_SetCursor(mouse_cursor);
 
@@ -480,6 +509,9 @@ bool on_event(SDL_Event *event)
 	case SDL_MOUSEMOTION:
 		mousex = event->motion.x / screen_zoom;
 		mousey = event->motion.y / screen_zoom;
+#ifdef __ANDROID__
+		TE4AndroidUpdatePointerPosition(event->motion.x, event->motion.y);
+#endif
 
 		if (current_mousehandler != LUA_NOREF)
 		{
@@ -503,6 +535,9 @@ bool on_event(SDL_Event *event)
 		return TRUE;
 	case SDL_FINGERDOWN:
 	case SDL_FINGERUP:
+#ifdef __ANDROID__
+		updateAndroidPointerFromTouch(event->tfinger.x, event->tfinger.y);
+#endif
 		if (current_mousehandler != LUA_NOREF)
 		{
 			lua_rawgeti(L, LUA_REGISTRYINDEX, current_mousehandler);
@@ -521,6 +556,9 @@ bool on_event(SDL_Event *event)
 		}
 		return TRUE;
 	case SDL_FINGERMOTION:
+#ifdef __ANDROID__
+		updateAndroidPointerFromTouch(event->tfinger.x, event->tfinger.y);
+#endif
 		if (current_mousehandler != LUA_NOREF)
 		{
 			lua_rawgeti(L, LUA_REGISTRYINDEX, current_mousehandler);
