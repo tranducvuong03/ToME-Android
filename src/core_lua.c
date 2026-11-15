@@ -431,7 +431,7 @@ static int lua_flush_key_events(lua_State *L)
 
 static int lua_key_unicode(lua_State *L)
 {
-	if (lua_isboolean(L, 1)) SDL_StartTextInput();
+	if (lua_isboolean(L, 1) && lua_toboolean(L, 1)) SDL_StartTextInput();
 	else SDL_StopTextInput();
 	return 0;
 }
