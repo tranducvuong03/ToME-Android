@@ -3,6 +3,17 @@
 #include <unistd.h>
 #include <SDL.h>
 
+static SDL_atomic_t lastPointerX;
+static SDL_atomic_t lastPointerY;
+static SDL_atomic_t lastPointerValid;
+
+void TE4AndroidUpdatePointerPosition(int x, int y)
+{
+	SDL_AtomicSet(&lastPointerX, x);
+	SDL_AtomicSet(&lastPointerY, y);
+	SDL_AtomicSet(&lastPointerValid, 1);
+}
+
 static void pushKeyEvent(Uint32 type, SDL_Keycode keycode)
 {
 	SDL_Event event;
@@ -59,7 +70,12 @@ Java_org_te4_android_TE4Activity_nativeSendMouseButton(JNIEnv *env, jclass type,
 	if (!SDL_WasInit(SDL_INIT_VIDEO)) return;
 	if (button != SDL_BUTTON_LEFT && button != SDL_BUTTON_RIGHT) return;
 
-	SDL_GetMouseState(&x, &y);
+	if (SDL_AtomicGet(&lastPointerValid)) {
+		x = SDL_AtomicGet(&lastPointerX);
+		y = SDL_AtomicGet(&lastPointerY);
+	} else {
+		SDL_GetMouseState(&x, &y);
+	}
 	pushMouseButtonEvent(SDL_MOUSEBUTTONDOWN, (Uint8)button, x, y);
 	pushMouseButtonEvent(SDL_MOUSEBUTTONUP, (Uint8)button, x, y);
 }
