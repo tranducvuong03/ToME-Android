@@ -21,7 +21,8 @@ The game runs in landscape. The translucent bottom bar keeps the keyboard
 toggle, Escape, Tab, and arrow keys; use the lower-left joystick for eight-way
 movement. Tap `+` to type and save a one-character shortcut with the phone's
 keyboard. Saved shortcuts persist between launches; long-press one to delete
-it. The built-in controls cannot be deleted.
+it. The built-in controls cannot be deleted. A quick tap on the game area sends
+Enter; taps on the joystick and control bar remain dedicated to those controls.
 
 ## Licensing
 

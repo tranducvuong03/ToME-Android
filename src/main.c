@@ -1201,6 +1201,7 @@ void do_resize(int w, int h, bool fullscreen, bool borderless, float zoom)
 	SDL_GetWindowSize(window, &aw, &ah);
 	printf("[DO RESIZE] Got: %dx%d (%d, %d)\n", aw, ah, is_fullscreen, borderless);
 	SDL_GL_MakeCurrent(window, maincontext);
+	SDL_GL_GetDrawableSize(window, &aw, &ah);
 	resizeWindow(aw, ah);
 
 }
@@ -1585,7 +1586,30 @@ int main(int argc, char *argv[])
 
 	boot_lua(1, FALSE, argc, argv);
 
+#ifdef __ANDROID__
+	int initial_width = WIDTH;
+	int initial_height = HEIGHT;
+	SDL_DisplayMode display_mode;
+	if (SDL_GetCurrentDisplayMode(0, &display_mode) == 0
+			&& display_mode.w > 0 && display_mode.h > 0) {
+		initial_width = display_mode.w;
+		initial_height = display_mode.h;
+		printf("[ANDROID] Using display mode %dx%d\n", initial_width, initial_height);
+	} else {
+		SDL_Rect display_bounds;
+		if (SDL_GetDisplayBounds(0, &display_bounds) == 0
+				&& display_bounds.w > 0 && display_bounds.h > 0) {
+			initial_width = display_bounds.w;
+			initial_height = display_bounds.h;
+			printf("[ANDROID] Using display bounds %dx%d\n", initial_width, initial_height);
+		} else {
+			printf("[ANDROID] Could not query display bounds: %s\n", SDL_GetError());
+		}
+	}
+	do_resize(initial_width, initial_height, TRUE, FALSE, screen_zoom);
+#else
 	do_resize(WIDTH, HEIGHT, FALSE, FALSE, screen_zoom);
+#endif
 	if (screen==NULL) {
 		printf("error opening screen: %s\n", SDL_GetError());
 		return 3;
@@ -1593,9 +1617,6 @@ int main(int argc, char *argv[])
 
 	SDL_SetWindowTitle(window, "T4Engine");
 	TTF_Init();
-
-	/* Sets up OpenGL double buffering */
-	resizeWindow(WIDTH, HEIGHT);
 
 	// Allow screensaver to work
 	SDL_EnableScreenSaver();
