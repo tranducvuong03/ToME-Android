@@ -162,6 +162,7 @@ add_library(te4deps STATIC
     ${TE4_PHYSFS_SOURCES}
 )
 target_include_directories(te4deps PUBLIC
+    "${sdl2_image_SOURCE_DIR}/external/zlib"
     "${TE4_SRC}"
     "${TE4_SRC}/lua"
     "${TE4_SRC}/luasocket"
