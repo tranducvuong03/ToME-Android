@@ -161,6 +161,7 @@ add_library(te4deps STATIC
     "${TE4_SRC}/utf8proc/utf8proc.c"
     ${TE4_PHYSFS_SOURCES}
 )
+target_compile_options(te4deps PRIVATE $<$<CONFIG:Debug>:-O2>)
 target_include_directories(te4deps PUBLIC
     "${sdl2_image_SOURCE_DIR}/external/zlib"
     "${TE4_SRC}"
@@ -213,7 +214,11 @@ target_compile_definitions(main PRIVATE
     TENGINE_HOME_PATH=\".t-engine\"
     SELFEXE_ANDROID
 )
-target_compile_options(main PRIVATE -Wno-deprecated-declarations -Wno-unused-function)
+target_compile_options(main PRIVATE
+    -Wno-deprecated-declarations
+    -Wno-unused-function
+    $<$<CONFIG:Debug>:-O2>
+)
 target_link_libraries(main PRIVATE
     te4deps
     SDL2

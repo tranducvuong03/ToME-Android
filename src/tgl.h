@@ -79,9 +79,9 @@ extern GLfloat *gl_c_colors_ptr;
 }
 #define glColorPointer(nb, t, v, p) \
 { \
-	if ((p) != gl_c_colors_ptr || (nb) != gl_c_texcoords_nb) { glColorPointer((nb), (t), (v), (p)); gl_c_colors_ptr=(p); gl_c_colors_nb = (nb); } \
+	if ((p) != gl_c_colors_ptr || (nb) != gl_c_colors_nb) { glColorPointer((nb), (t), (v), (p)); gl_c_colors_ptr=(p); gl_c_colors_nb = (nb); } \
 }
 #define glTexCoordPointer(nb, t, v, p) \
 { \
-	if ((p) != gl_c_texcoords_ptr || (nb) != gl_c_colors_nb) { glTexCoordPointer((nb), (t), (v), (p)); gl_c_texcoords_ptr=(p); gl_c_texcoords_nb = (nb); } \
+	if ((p) != gl_c_texcoords_ptr || (nb) != gl_c_texcoords_nb) { glTexCoordPointer((nb), (t), (v), (p)); gl_c_texcoords_ptr=(p); gl_c_texcoords_nb = (nb); } \
 }
