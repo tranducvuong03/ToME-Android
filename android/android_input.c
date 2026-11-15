@@ -6,6 +6,7 @@
 static SDL_atomic_t lastPointerX;
 static SDL_atomic_t lastPointerY;
 static SDL_atomic_t lastPointerValid;
+extern SDL_Window *window;
 
 void TE4AndroidUpdatePointerPosition(int x, int y)
 {
@@ -78,6 +79,53 @@ Java_org_te4_android_TE4Activity_nativeSendMouseButton(JNIEnv *env, jclass type,
 	}
 	pushMouseButtonEvent(SDL_MOUSEBUTTONDOWN, (Uint8)button, x, y);
 	pushMouseButtonEvent(SDL_MOUSEBUTTONUP, (Uint8)button, x, y);
+}
+
+JNIEXPORT void JNICALL
+Java_org_te4_android_TE4Activity_nativeMoveMouse(JNIEnv *env, jclass type, jint dx, jint dy)
+{
+	int x = 0, y = 0, width, height, previousX, previousY;
+	SDL_Event event;
+	(void)env;
+	(void)type;
+	if (!SDL_WasInit(SDL_INIT_VIDEO) || !window) return;
+
+	SDL_GetWindowSize(window, &width, &height);
+	if (width <= 0 || height <= 0) return;
+
+	if (SDL_AtomicGet(&lastPointerValid)) {
+		x = SDL_AtomicGet(&lastPointerX);
+		y = SDL_AtomicGet(&lastPointerY);
+	} else {
+		SDL_GetMouseState(&x, &y);
+		if (x == 0 && y == 0) {
+			x = width / 2;
+			y = height / 2;
+		}
+	}
+
+	previousX = x;
+	previousY = y;
+	x += dx;
+	y += dy;
+	if (x < 0) x = 0;
+	else if (x >= width) x = width - 1;
+	if (y < 0) y = 0;
+	else if (y >= height) y = height - 1;
+
+	SDL_zero(event);
+	event.type = SDL_MOUSEMOTION;
+	event.motion.type = SDL_MOUSEMOTION;
+	event.motion.windowID = SDL_GetWindowID(window);
+	event.motion.x = x;
+	event.motion.y = y;
+	event.motion.xrel = x - previousX;
+	event.motion.yrel = y - previousY;
+	if (SDL_PushEvent(&event) < 0) {
+		fprintf(stderr, "Could not queue Android virtual mouse motion: %s\n", SDL_GetError());
+		return;
+	}
+	TE4AndroidUpdatePointerPosition(x, y);
 }
 
 JNIEXPORT void JNICALL
