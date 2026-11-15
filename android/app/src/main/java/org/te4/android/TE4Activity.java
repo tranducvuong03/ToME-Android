@@ -26,6 +26,7 @@ import android.view.MotionEvent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
@@ -55,13 +56,14 @@ public final class TE4Activity extends SDLActivity {
     private static final int SDLK_KP_7 = 1073741919;
     private static final int SDLK_KP_9 = 1073741921;
     private static final int SDLK_RETURN = 13;
+    private static final int SDL_BUTTON_LEFT = 1;
+    private static final int SDL_BUTTON_RIGHT = 3;
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
     private DirectionPadView directionPad;
     private View barToggle;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
-    private boolean textInputEnabled = true;
     private TextView installStatus;
 
     @Override
@@ -124,6 +126,7 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private static native void nativeSendKey(int keycode);
+    private static native void nativeSendMouseButton(int button);
     private static native void nativeSetTextInput(boolean enabled);
     private static native boolean nativeRedirectLog(int fd);
 
@@ -191,6 +194,10 @@ public final class TE4Activity extends SDLActivity {
         barLayout.rightMargin = dp(4);
         barLayout.bottomMargin = dp(5);
         addContentView(shortcutBar, barLayout);
+        restoreOverlayWhenLaidOut(shortcutBar, "shortcut_bar", true);
+        attachDragHandle(shortcutBar, shortcutBar, "shortcut_bar", true);
+        shortcutBar.setContentDescription(
+                "Shortcut bar; hold a built-in key or blank area to move the bar");
 
         directionPad = new DirectionPadView(this);
         FrameLayout.LayoutParams directionPadLayout = new FrameLayout.LayoutParams(
@@ -217,9 +224,12 @@ public final class TE4Activity extends SDLActivity {
                         ? View.GONE : View.VISIBLE);
             }
         });
+        attachDragHandle(barToggle, barToggle, "bar_toggle", false);
+        barToggle.setContentDescription("Show or hide the shortcut bar; hold and drag to move");
         FrameLayout.LayoutParams toggleLayout = new FrameLayout.LayoutParams(
                 dp(56), height, Gravity.TOP | Gravity.START);
         addContentView(barToggle, toggleLayout);
+        restoreOverlayWhenLaidOut(barToggle, "bar_toggle", false);
     }
 
     private void addControl(LinearLayout row, String label, final int keycode, boolean keyboard) {
@@ -235,13 +245,15 @@ public final class TE4Activity extends SDLActivity {
             @Override
             public void onClick(View view) {
                 if (keyboard) {
-                    textInputEnabled = !textInputEnabled;
-                    nativeSetTextInput(textInputEnabled);
+                    boolean showKeyboard = !SDLActivity.isScreenKeyboardShown();
+                    nativeSetTextInput(showKeyboard);
+                    if (showKeyboard) SDLActivity.showTextInput(0, 0, 1, 1);
                 } else {
                     nativeSendKey(keycode);
                 }
             }
         });
+        attachDragHandle(control, shortcutBar, "shortcut_bar", true);
     }
 
     private void renderCustomShortcuts() {
@@ -253,6 +265,8 @@ public final class TE4Activity extends SDLActivity {
         addControl(shortcutKeys, "↓", SDLK_DOWN, false);
         addControl(shortcutKeys, "←", SDLK_LEFT, false);
         addControl(shortcutKeys, "→", SDLK_RIGHT, false);
+        addMouseControl(shortcutKeys, "LMB", SDL_BUTTON_LEFT);
+        addMouseControl(shortcutKeys, "RMB", SDL_BUTTON_RIGHT);
 
         for (final Shortcut shortcut : customShortcuts) {
             TextView control = makeControl(shortcut.label);
@@ -285,6 +299,187 @@ public final class TE4Activity extends SDLActivity {
                 showAddShortcutDialog();
             }
         });
+    }
+
+    private void addMouseControl(LinearLayout row, String label, final int button) {
+        TextView control = makeControl(label);
+        control.setContentDescription(button == SDL_BUTTON_LEFT
+                ? "Left mouse click" : "Right mouse click");
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(46), dp(38));
+        params.setMargins(dp(2), 0, dp(2), 0);
+        row.addView(control, params);
+        control.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                nativeSendMouseButton(button);
+            }
+        });
+        attachDragHandle(control, shortcutBar, "shortcut_bar", true);
+    }
+
+    private void attachDragHandle(View handle, View target, String preferenceKey,
+            boolean expandToRight) {
+        handle.setOnTouchListener(
+                new OverlayDragListener(handle, target, preferenceKey, expandToRight));
+    }
+
+    private void restoreOverlayWhenLaidOut(final View target, final String preferenceKey,
+            final boolean expandToRight) {
+        target.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (target.getWidth() > 0 && target.getHeight() > 0) {
+                    target.removeOnLayoutChangeListener(this);
+                    restoreOverlayPosition(target, preferenceKey, expandToRight);
+                }
+            }
+        });
+    }
+
+    private void restoreOverlayPosition(View target, String preferenceKey, boolean expandToRight) {
+        ViewGroup parent = (ViewGroup) target.getParent();
+        if (!(parent instanceof FrameLayout) || parent.getWidth() == 0 || parent.getHeight() == 0) {
+            return;
+        }
+
+        android.content.SharedPreferences preferences =
+                getSharedPreferences("te4_controls", MODE_PRIVATE);
+        String xKey = preferenceKey + "_x";
+        String yKey = preferenceKey + "_y";
+        if (!preferences.contains(xKey) || !preferences.contains(yKey)) return;
+
+        int maxX = getOverlayMaxX(target, parent, expandToRight);
+        int maxY = Math.max(0, parent.getHeight() - target.getHeight());
+        float xFraction = Math.max(0f, Math.min(1f, preferences.getFloat(xKey, 0f)));
+        float yFraction = Math.max(0f, Math.min(1f, preferences.getFloat(yKey, 0f)));
+        moveOverlay(target, maxX * xFraction, maxY * yFraction, expandToRight);
+    }
+
+    private int getOverlayMaxX(View target, ViewGroup parent, boolean expandToRight) {
+        if (expandToRight) return Math.max(0, parent.getWidth() - dp(124));
+        return Math.max(0, parent.getWidth() - target.getWidth());
+    }
+
+    private void moveOverlay(View target, float x, float y, boolean expandToRight) {
+        ViewGroup parent = (ViewGroup) target.getParent();
+        if (!(parent instanceof FrameLayout)) return;
+
+        int maxX = getOverlayMaxX(target, parent, expandToRight);
+        int maxY = Math.max(0, parent.getHeight() - target.getHeight());
+        int left = Math.max(0, Math.min(maxX, Math.round(x)));
+        int top = Math.max(0, Math.min(maxY, Math.round(y)));
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) target.getLayoutParams();
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.leftMargin = left;
+        params.topMargin = top;
+        params.bottomMargin = 0;
+        if (expandToRight) {
+            params.width = Math.max(dp(120), parent.getWidth() - left - dp(4));
+            params.rightMargin = dp(4);
+        } else {
+            params.rightMargin = 0;
+        }
+        target.setLayoutParams(params);
+    }
+
+    private void saveOverlayPosition(View target, String preferenceKey, boolean expandToRight) {
+        ViewGroup parent = (ViewGroup) target.getParent();
+        if (!(parent instanceof FrameLayout)) return;
+
+        int maxX = Math.max(1, getOverlayMaxX(target, parent, expandToRight));
+        int maxY = Math.max(1, parent.getHeight() - target.getHeight());
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) target.getLayoutParams();
+        boolean saved = getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
+                .putFloat(preferenceKey + "_x", (float) params.leftMargin / maxX)
+                .putFloat(preferenceKey + "_y", (float) params.topMargin / maxY)
+                .commit();
+        if (!saved) Log.e("TE4", "Could not save " + preferenceKey + " position");
+    }
+
+    private final class OverlayDragListener implements View.OnTouchListener {
+        private final View handle;
+        private final View target;
+        private final String preferenceKey;
+        private final boolean expandToRight;
+        private final Handler handler = new Handler(Looper.getMainLooper());
+        private boolean pointerDown;
+        private boolean longPressReached;
+        private boolean dragging;
+        private float dragOffsetX;
+        private float dragOffsetY;
+
+        private final Runnable startDragging = new Runnable() {
+            @Override
+            public void run() {
+                if (pointerDown && handle.getParent() != null) {
+                    longPressReached = true;
+                    handle.getParent().requestDisallowInterceptTouchEvent(true);
+                }
+            }
+        };
+
+        OverlayDragListener(View handle, View target, String preferenceKey,
+                boolean expandToRight) {
+            this.handle = handle;
+            this.target = target;
+            this.preferenceKey = preferenceKey;
+            this.expandToRight = expandToRight;
+        }
+
+        @Override
+        public boolean onTouch(View handle, MotionEvent event) {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    int[] location = new int[2];
+                    target.getLocationOnScreen(location);
+                    dragOffsetX = event.getRawX() - location[0];
+                    dragOffsetY = event.getRawY() - location[1];
+                    pointerDown = true;
+                    longPressReached = false;
+                    dragging = false;
+                    handler.postDelayed(startDragging, ViewConfiguration.getLongPressTimeout());
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (longPressReached) {
+                        dragging = true;
+                        int[] parentLocation = new int[2];
+                        ViewGroup parent = (ViewGroup) target.getParent();
+                        if (parent == null) return true;
+                        parent.getLocationOnScreen(parentLocation);
+                        moveOverlay(target,
+                                event.getRawX() - parentLocation[0] - dragOffsetX,
+                                event.getRawY() - parentLocation[1] - dragOffsetY,
+                                expandToRight);
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    handler.removeCallbacks(startDragging);
+                    if (dragging) {
+                        saveOverlayPosition(target, preferenceKey, expandToRight);
+                    } else if (!longPressReached) {
+                        handle.performClick();
+                    }
+                    reset();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    handler.removeCallbacks(startDragging);
+                    if (dragging) saveOverlayPosition(target, preferenceKey, expandToRight);
+                    reset();
+                    return true;
+                default:
+                    return true;
+            }
+        }
+
+        private void reset() {
+            if (handle.getParent() != null) {
+                handle.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+            pointerDown = false;
+            longPressReached = false;
+            dragging = false;
+        }
     }
 
     private void showAddShortcutDialog() {
