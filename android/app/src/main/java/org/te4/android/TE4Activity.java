@@ -21,6 +21,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
+import android.system.ErrnoException;
+import android.system.Os;
 import android.text.InputType;
 import android.view.MotionEvent;
 import android.view.Gravity;
@@ -56,13 +58,11 @@ public final class TE4Activity extends SDLActivity {
     private static final int SDLK_KP_7 = 1073741919;
     private static final int SDLK_KP_9 = 1073741921;
     private static final int SDLK_RETURN = 13;
-    private static final int SDL_BUTTON_LEFT = 1;
-    private static final int SDL_BUTTON_RIGHT = 3;
+    private static final String ENGINE_ARCHIVE_UPDATE_MARKER =
+            ".te4-engine-archive-update-v2";
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
-    private LinearLayout mouseControlsPanel;
-    private CursorPadView cursorPad;
     private DirectionPadView directionPad;
     private View barToggle;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
@@ -71,6 +71,7 @@ public final class TE4Activity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         ParcelFileDescriptor logFile = null;
+        boolean engineArchiveUpdateFailed = false;
         try {
             logFile = openPublicLogFile();
         } catch (IOException e) {
@@ -79,7 +80,8 @@ public final class TE4Activity extends SDLActivity {
             Log.e("TE4", "Could not access public game log", e);
         }
 
-        if (!new File(getFilesDir(), ".te4-data-installed").isFile()) {
+        File gameDataMarker = new File(getFilesDir(), ".te4-data-installed");
+        if (!gameDataMarker.isFile()) {
             File errorMarker = new File(getFilesDir(), ".te4-data-install-error");
             if (errorMarker.exists() && !errorMarker.delete()) {
                 Log.e("TE4", "Could not clear previous game data installation error");
@@ -90,6 +92,16 @@ public final class TE4Activity extends SDLActivity {
                     installGameData();
                 }
             }, "TE4 game data installer").start();
+        } else if (!new File(getFilesDir(), ENGINE_ARCHIVE_UPDATE_MARKER).isFile()) {
+            try {
+                updateEngineArchive();
+            } catch (IOException e) {
+                Log.e("TE4", "Could not update the game engine archive", e);
+                engineArchiveUpdateFailed = true;
+            } catch (SecurityException e) {
+                Log.e("TE4", "Could not update the game engine archive", e);
+                engineArchiveUpdateFailed = true;
+            }
         }
         super.onCreate(savedInstanceState);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
@@ -109,7 +121,10 @@ public final class TE4Activity extends SDLActivity {
             }
         }
         createTouchControls();
-        if (!new File(getFilesDir(), ".te4-data-installed").isFile()) {
+        if (engineArchiveUpdateFailed) {
+            Toast.makeText(this, "Could not update game engine", Toast.LENGTH_LONG).show();
+        }
+        if (!gameDataMarker.isFile()) {
             installStatus = makeControl("Preparing game data…");
             FrameLayout.LayoutParams statusLayout = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, dp(52), Gravity.CENTER);
@@ -128,10 +143,37 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private static native void nativeSendKey(int keycode);
-    private static native void nativeSendMouseButton(int button);
-    private static native void nativeMoveMouse(int dx, int dy);
     private static native void nativeSetTextInput(boolean enabled);
     private static native boolean nativeRedirectLog(int fd);
+
+    private void updateEngineArchive() throws IOException {
+        File engineArchive = new File(getFilesDir(), "game/engines/te4-1.7.6.teae");
+        File temporaryArchive = new File(engineArchive.getParentFile(),
+                "te4-1.7.6.teae.tmp");
+        File marker = new File(getFilesDir(), ENGINE_ARCHIVE_UPDATE_MARKER);
+
+        try {
+            if (temporaryArchive.exists() && !temporaryArchive.delete()) {
+                throw new IOException("Could not clear an incomplete engine archive update");
+            }
+            copyAssetTree(getAssets(), "game/engines/te4-1.7.6.teae", temporaryArchive);
+            if (!temporaryArchive.isFile() || temporaryArchive.length() == 0) {
+                throw new IOException("Updated engine archive is empty");
+            }
+            try {
+                Os.rename(temporaryArchive.getAbsolutePath(), engineArchive.getAbsolutePath());
+            } catch (ErrnoException e) {
+                throw new IOException("Could not replace the engine archive", e);
+            }
+        } finally {
+            if (temporaryArchive.exists() && !temporaryArchive.delete()) {
+                Log.e("TE4", "Could not remove temporary engine archive");
+            }
+        }
+        if (!marker.createNewFile() && !marker.isFile()) {
+            throw new IOException("Could not record the engine archive update");
+        }
+    }
 
     private ParcelFileDescriptor openPublicLogFile() throws IOException {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -219,41 +261,6 @@ public final class TE4Activity extends SDLActivity {
             }
         });
 
-        mouseControlsPanel = new LinearLayout(this);
-        mouseControlsPanel.setOrientation(LinearLayout.VERTICAL);
-        mouseControlsPanel.setGravity(Gravity.CENTER_HORIZONTAL);
-        mouseControlsPanel.setPadding(dp(3), dp(3), dp(3), dp(3));
-        mouseControlsPanel.setBackgroundColor(0xAA202020);
-
-        LinearLayout mouseActions = new LinearLayout(this);
-        mouseActions.setGravity(Gravity.CENTER);
-        TextView mousePanelHandle = makeControl("MOVE");
-        mousePanelHandle.setContentDescription("Hold and drag to move mouse controls");
-        LinearLayout.LayoutParams handleParams = new LinearLayout.LayoutParams(
-                dp(46), dp(38));
-        handleParams.setMargins(dp(2), 0, dp(2), 0);
-        mouseActions.addView(mousePanelHandle, handleParams);
-        addMouseControl(mouseActions, "LMB", SDL_BUTTON_LEFT);
-        addMouseControl(mouseActions, "RMB", SDL_BUTTON_RIGHT);
-        mouseControlsPanel.addView(mouseActions, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        cursorPad = new CursorPadView(this);
-        LinearLayout.LayoutParams cursorPadParams = new LinearLayout.LayoutParams(
-                dp(144), dp(144));
-        cursorPadParams.gravity = Gravity.CENTER_HORIZONTAL;
-        mouseControlsPanel.addView(cursorPad, cursorPadParams);
-        mouseControlsPanel.setVisibility(View.INVISIBLE);
-
-        FrameLayout.LayoutParams mousePanelLayout = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.END);
-        mousePanelLayout.topMargin = dp(58);
-        mousePanelLayout.rightMargin = dp(6);
-        addContentView(mouseControlsPanel, mousePanelLayout);
-        restoreOverlayWhenLaidOut(mouseControlsPanel, "mouse_panel", false);
-        attachDragHandle(mousePanelHandle, mouseControlsPanel, "mouse_panel", false);
-
         barToggle = makeControl("BAR");
         barToggle.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -269,23 +276,6 @@ public final class TE4Activity extends SDLActivity {
         addContentView(barToggle, toggleLayout);
         restoreOverlayWhenLaidOut(barToggle, "bar_toggle", false);
 
-        final TextView mouseToggle = makeControl("MOUSE");
-        mouseToggle.setContentDescription("Show or hide the mouse cursor controls");
-        mouseToggle.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                boolean hideMouseControls = mouseControlsPanel.getVisibility() == View.VISIBLE;
-                mouseControlsPanel.setVisibility(hideMouseControls ? View.INVISIBLE : View.VISIBLE);
-                if (hideMouseControls) cursorPad.stop();
-            }
-        });
-        attachDragHandle(mouseToggle, mouseToggle, "mouse_toggle", false);
-        FrameLayout.LayoutParams mouseToggleLayout = new FrameLayout.LayoutParams(
-                dp(72), height, Gravity.TOP | Gravity.END);
-        mouseToggleLayout.rightMargin = dp(6);
-        mouseToggleLayout.topMargin = dp(6);
-        addContentView(mouseToggle, mouseToggleLayout);
-        restoreOverlayWhenLaidOut(mouseToggle, "mouse_toggle", false);
     }
 
     private void addControl(LinearLayout row, String label, final int keycode, boolean keyboard) {
@@ -321,8 +311,6 @@ public final class TE4Activity extends SDLActivity {
         addControl(shortcutKeys, "↓", SDLK_DOWN, false);
         addControl(shortcutKeys, "←", SDLK_LEFT, false);
         addControl(shortcutKeys, "→", SDLK_RIGHT, false);
-        addControl(shortcutKeys, "<", '<', false);
-        addControl(shortcutKeys, ">", '>', false);
 
         for (final Shortcut shortcut : customShortcuts) {
             TextView control = makeControl(shortcut.label);
@@ -353,21 +341,6 @@ public final class TE4Activity extends SDLActivity {
             @Override
             public void onClick(View view) {
                 showAddShortcutDialog();
-            }
-        });
-    }
-
-    private void addMouseControl(LinearLayout row, String label, final int button) {
-        TextView control = makeControl(label);
-        control.setContentDescription(button == SDL_BUTTON_LEFT
-                ? "Left mouse click" : "Right mouse click");
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(46), dp(38));
-        params.setMargins(dp(2), 0, dp(2), 0);
-        row.addView(control, params);
-        control.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                nativeSendMouseButton(button);
             }
         });
     }
@@ -674,139 +647,6 @@ public final class TE4Activity extends SDLActivity {
         }
     }
 
-    private static final class CursorPadView extends View {
-        private static final int MOVE_REPEAT_DELAY_MS = 70;
-        private static final String[][] DIRECTIONS = {
-                { "↖", "↑", "↗" },
-                { "←", "•", "→" },
-                { "↙", "↓", "↘" }
-        };
-
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Handler handler = new Handler(Looper.getMainLooper());
-        private int activeDx;
-        private int activeDy;
-
-        private final Runnable repeatMove = new Runnable() {
-            @Override
-            public void run() {
-                if (activeDx != 0 || activeDy != 0) {
-                    moveCursor();
-                    handler.postDelayed(this, MOVE_REPEAT_DELAY_MS);
-                }
-            }
-        };
-
-        CursorPadView(TE4Activity context) {
-            super(context);
-            setClickable(true);
-            setContentDescription("Mouse cursor joystick; hold a direction to move the pointer");
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            float cellWidth = getWidth() / 3f;
-            float cellHeight = getHeight() / 3f;
-            float gap = dp(2);
-            paint.setTextAlign(Paint.Align.CENTER);
-            paint.setTypeface(Typeface.DEFAULT_BOLD);
-
-            for (int row = 0; row < 3; row++) {
-                for (int column = 0; column < 3; column++) {
-                    float left = column * cellWidth + gap;
-                    float top = row * cellHeight + gap;
-                    float right = (column + 1) * cellWidth - gap;
-                    float bottom = (row + 1) * cellHeight - gap;
-                    boolean active = (activeDx != 0 || activeDy != 0)
-                            && activeDx == column - 1 && activeDy == row - 1;
-
-                    paint.setStyle(Paint.Style.FILL);
-                    paint.setColor(active ? 0xCC777777 : 0x88707070);
-                    canvas.drawRoundRect(left, top, right, bottom, dp(5), dp(5), paint);
-
-                    paint.setStyle(Paint.Style.STROKE);
-                    paint.setStrokeWidth(dp(1));
-                    paint.setColor(0x99FFFFFF);
-                    canvas.drawRoundRect(left, top, right, bottom, dp(5), dp(5), paint);
-
-                    paint.setStyle(Paint.Style.FILL);
-                    paint.setColor(Color.WHITE);
-                    paint.setTextSize(dp(24));
-                    float textY = (top + bottom) / 2f
-                            - (paint.ascent() + paint.descent()) / 2f;
-                    canvas.drawText(DIRECTIONS[row][column],
-                            (left + right) / 2f, textY, paint);
-                }
-            }
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                case MotionEvent.ACTION_MOVE:
-                    updateDirection(event.getX(), event.getY());
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                case MotionEvent.ACTION_POINTER_UP:
-                    releaseDirection();
-                    return true;
-                default:
-                    return true;
-            }
-        }
-
-        @Override
-        protected void onDetachedFromWindow() {
-            handler.removeCallbacks(repeatMove);
-            super.onDetachedFromWindow();
-        }
-
-        private void updateDirection(float x, float y) {
-            if (getWidth() == 0 || getHeight() == 0) return;
-            int column = Math.max(0, Math.min(2, (int) (x * 3 / getWidth())));
-            int row = Math.max(0, Math.min(2, (int) (y * 3 / getHeight())));
-            int nextDx = column - 1;
-            int nextDy = row - 1;
-            if (nextDx == activeDx && nextDy == activeDy) return;
-
-            handler.removeCallbacks(repeatMove);
-            activeDx = nextDx;
-            activeDy = nextDy;
-            if (activeDx != 0 || activeDy != 0) {
-                moveCursor();
-                handler.postDelayed(repeatMove, MOVE_REPEAT_DELAY_MS);
-            }
-            invalidate();
-        }
-
-        private void moveCursor() {
-            int step = Math.max(1, dp(8));
-            nativeMoveMouse(activeDx * step, activeDy * step);
-        }
-
-        private float dp(float value) {
-            return value * getResources().getDisplayMetrics().density;
-        }
-
-        private int dp(int value) {
-            return Math.round(value * getResources().getDisplayMetrics().density);
-        }
-
-        private void releaseDirection() {
-            handler.removeCallbacks(repeatMove);
-            activeDx = 0;
-            activeDy = 0;
-            invalidate();
-        }
-
-        void stop() {
-            releaseDirection();
-        }
-    }
-
     private static final class DirectionPadView extends View {
         private static final int NO_KEY = -1;
         private static final int REPEAT_DELAY_MS = 170;
@@ -1038,6 +878,10 @@ public final class TE4Activity extends SDLActivity {
         try {
             copyAssetTree(getAssets(), "bootstrap", new File(getFilesDir(), "bootstrap"));
             copyAssetTree(getAssets(), "game", new File(getFilesDir(), "game"));
+            File engineArchiveMarker = new File(getFilesDir(), ENGINE_ARCHIVE_UPDATE_MARKER);
+            if (!engineArchiveMarker.isFile() && !engineArchiveMarker.createNewFile()) {
+                throw new IOException("Could not record the engine archive version");
+            }
             if (!marker.createNewFile()) {
                 throw new IOException("Could not create game data marker");
             }
