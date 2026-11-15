@@ -1447,6 +1447,19 @@ void handleIdleTransition(int goIdle)
 	}
 }
 
+static void notifyResolutionChange(void)
+{
+	if (current_game != LUA_NOREF)
+	{
+		lua_rawgeti(L, LUA_REGISTRYINDEX, current_game);
+		lua_pushstring(L, "onResolutionChange");
+		lua_gettable(L, -2);
+		lua_remove(L, -2);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, current_game);
+		docall(L, 1, 0);
+	}
+}
+
 /**
  * Core entry point.
  */
@@ -1665,22 +1678,24 @@ int main(int argc, char *argv[])
 				switch (event.window.event)
 				{
 				case SDL_WINDOWEVENT_RESIZED:
-					/* Note: SDL can't resize a fullscreen window, so don't bother! */
 					if (!is_fullscreen) {
 						printf("SDL_WINDOWEVENT_RESIZED: %d x %d\n", event.window.data1, event.window.data2);
 						do_resize(event.window.data1, event.window.data2, is_fullscreen, is_borderless, screen_zoom);
-						if (current_game != LUA_NOREF)
-						{
-							lua_rawgeti(L, LUA_REGISTRYINDEX, current_game);
-							lua_pushstring(L, "onResolutionChange");
-							lua_gettable(L, -2);
-							lua_remove(L, -2);
-							lua_rawgeti(L, LUA_REGISTRYINDEX, current_game);
-							docall(L, 1, 0);
-						}
+						notifyResolutionChange();
 					} else {
+#ifdef __ANDROID__
+						int drawable_width, drawable_height;
+						SDL_GL_MakeCurrent(window, maincontext);
+						SDL_GL_GetDrawableSize(window, &drawable_width, &drawable_height);
+						printf("SDL_WINDOWEVENT_RESIZED: fullscreen %d x %d\n",
+								drawable_width, drawable_height);
+						if (drawable_width > 0 && drawable_height > 0) {
+							resizeWindow(drawable_width, drawable_height);
+							notifyResolutionChange();
+						}
+#else
 						printf("SDL_WINDOWEVENT_RESIZED: ignored due to fullscreen\n");
-
+#endif
 					}
 					break;
 				case SDL_WINDOWEVENT_MOVED: {
