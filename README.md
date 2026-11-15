@@ -30,6 +30,14 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | Hold a built-in key on the shortcut bar, then drag | Reposition the shortcut bar. Release to save its position for future launches. |
 | `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches; long-press one to delete it. Built-in controls cannot be deleted. |
 
+## DLC on Android
+
+Put downloaded DLC archives (`.teaa`) in
+`Download/Tales of Maj'Eyal/DLC`. Tap **DLC** in the game and choose this folder
+once when prompted; create the folder first if it does not exist. The app copies
+new archives into its private `game/addons` folder at launch. **Import now**
+copies them immediately, but the game must be restarted before they are loaded.
+
 ## Licensing
 
 The engine and port code use GPL-3.0-only; see [LICENSE](LICENSE). Game content
