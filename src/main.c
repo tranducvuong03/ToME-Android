@@ -1476,7 +1476,9 @@ int main(int argc, char *argv[])
 	}
 	for (wait_count = 0; wait_count < 36000; wait_count++)
 	{
-		if (access(".te4-data-installed", F_OK) == 0) break;
+		if (access(".te4-data-installed", F_OK) == 0
+			&& (access(".te4-save-sync-ready", F_OK) == 0
+				|| access(".te4-save-sync-error", F_OK) == 0)) break;
 		if (access(".te4-data-install-error", F_OK) == 0)
 		{
 			fprintf(stderr, "Android game data installation failed\n");
@@ -1486,7 +1488,7 @@ int main(int argc, char *argv[])
 	}
 	if (wait_count == 36000)
 	{
-		fprintf(stderr, "Timed out waiting for Android game data installation\n");
+		fprintf(stderr, "Timed out waiting for Android game data or save synchronization\n");
 		return 1;
 	}
 	SDL_setenv("HOME", storage_path, 1);

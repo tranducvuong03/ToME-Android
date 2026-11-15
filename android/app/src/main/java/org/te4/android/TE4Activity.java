@@ -72,9 +72,15 @@ public final class TE4Activity extends SDLActivity {
     private static final int SDLK_KP_9 = 1073741921;
     private static final int SDLK_RETURN = 13;
     private static final int REQUEST_ADDONS_STORAGE = 0x5445;
+    private static final int REQUEST_INITIAL_SAVE_STORAGE = 0x5446;
+    private static final int REQUEST_SAVE_MANAGER_STORAGE = 0x5447;
     private static final String ADDONS_FOLDER_PATH = "Download/Tales of Maj'Eyal/addons";
     private static final String ADDONS_FOLDER_GUIDE =
             "Place .teaac DLC and .teaa add-on files here.txt";
+    private static final String SAVE_FOLDER_PATH = "Download/Tales of Maj'Eyal/save";
+    private static final String SAVE_FOLDER_GUIDE = "Copy game saves into this folder.txt";
+    private static final String SAVE_SYNC_READY_MARKER = ".te4-save-sync-ready";
+    private static final String SAVE_SYNC_ERROR_MARKER = ".te4-save-sync-error";
     private static final String GAME_ARCHIVE_UPDATE_MARKER =
             ".te4-game-archives-update-v4";
 
@@ -84,12 +90,24 @@ public final class TE4Activity extends SDLActivity {
     private View barToggle;
     private View padToggle;
     private View addonsButton;
+    private View saveButton;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
     private Map<String, ShortcutActionBinding> shortcutActionBindings;
     private TextView installStatus;
+    private AlertDialog saveImportProgress;
+    private boolean saveSyncInProgress;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        File saveSyncReadyMarker = new File(getFilesDir(), SAVE_SYNC_READY_MARKER);
+        if (saveSyncReadyMarker.exists() && !saveSyncReadyMarker.delete()) {
+            Log.e("TE4", "Could not clear previous save synchronization marker");
+        }
+        File saveSyncErrorMarker = new File(getFilesDir(), SAVE_SYNC_ERROR_MARKER);
+        if (saveSyncErrorMarker.exists() && !saveSyncErrorMarker.delete()) {
+            Log.e("TE4", "Could not clear previous save synchronization error");
+        }
+
         ParcelFileDescriptor logFile = null;
         boolean gameArchiveUpdateFailed = false;
         try {
@@ -141,6 +159,7 @@ public final class TE4Activity extends SDLActivity {
             }
         }
         createTouchControls();
+        prepareInitialSaveSync();
         if (gameArchiveUpdateFailed) {
             Toast.makeText(this, "Could not update game files", Toast.LENGTH_LONG).show();
         }
@@ -204,6 +223,131 @@ public final class TE4Activity extends SDLActivity {
                 .show();
     }
 
+    private void prepareInitialSaveSync() {
+        if (hasAddonsStoragePermission()) {
+            startInitialSaveSync();
+            return;
+        }
+
+        android.content.SharedPreferences preferences =
+                getSharedPreferences("te4_controls", MODE_PRIVATE);
+        if (!preferences.getBoolean("save_storage_permission_denied", false)) {
+            requestPermissions(new String[] {
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }, REQUEST_INITIAL_SAVE_STORAGE);
+        } else {
+            markSaveSyncReady();
+        }
+    }
+
+    private void startInitialSaveSync() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    ensureSaveFolderExists();
+                    int imported = syncSaveDirectory(
+                            getPublicSaveFolder(), getPrivateSaveFolder(), false);
+                    Log.i("TE4", "Restored " + imported + " save file(s) from public storage");
+                } catch (IOException e) {
+                    Log.e("TE4", "Could not restore game saves", e);
+                    showSaveSyncError("Could not restore game saves");
+                } catch (SecurityException e) {
+                    Log.e("TE4", "Could not access the public save folder", e);
+                    showSaveSyncError("Could not access the save folder");
+                } finally {
+                    markSaveSyncReady();
+                }
+            }
+        }, "TE4 save restore").start();
+    }
+
+    private void markSaveSyncReady() {
+        File marker = new File(getFilesDir(), SAVE_SYNC_READY_MARKER);
+        try {
+            if (!marker.exists() && !marker.createNewFile()) {
+                throw new IOException("Could not create save synchronization marker");
+            }
+        } catch (IOException e) {
+            Log.e("TE4", "Could not mark save synchronization as ready", e);
+            showSaveSyncError("Could not prepare game saves");
+            try {
+                new FileOutputStream(new File(getFilesDir(), SAVE_SYNC_ERROR_MARKER)).close();
+            } catch (IOException markerError) {
+                Log.e("TE4", "Could not record save synchronization failure", markerError);
+            }
+        }
+    }
+
+    private void showSaveManager() {
+        if (!hasAddonsStoragePermission()) {
+            requestPermissions(new String[] {
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }, REQUEST_SAVE_MANAGER_STORAGE);
+            return;
+        }
+
+        try {
+            ensureSaveFolderExists();
+        } catch (IOException e) {
+            Log.e("TE4", "Could not create the public save folder", e);
+            Toast.makeText(this, "Could not create the save folder", Toast.LENGTH_LONG).show();
+            return;
+        } catch (SecurityException e) {
+            Log.e("TE4", "Could not access the public save folder", e);
+            Toast.makeText(this, "Could not access the save folder", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Game saves")
+                .setMessage("Save folder:\n\n" + SAVE_FOLDER_PATH
+                        + "\n\nSaves are backed up when you return to the main menu and "
+                        + "restored when the game starts. Copy saves here to restore them. "
+                        + "Import replaces files with matching names.")
+                .setPositiveButton("Import Saves", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        startSaveImportInBackground();
+                    }
+                })
+                .setNeutralButton("Back Up Now", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        startSaveBackupInBackground();
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private void ensureSaveFolderExists() throws IOException {
+        File folder = getPublicSaveFolder();
+        if (!folder.isDirectory() && !folder.mkdirs()) {
+            throw new IOException("Could not create the save folder");
+        }
+        File guide = new File(folder, SAVE_FOLDER_GUIDE);
+        if (!guide.isFile() || guide.length() == 0) {
+            try (FileOutputStream output = new FileOutputStream(guide)) {
+                output.write(("Copy saved character folders here. They are imported when "
+                        + "the game starts and backed up when you return to the main menu.\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+    }
+
+    private File getPublicSaveFolder() {
+        File downloads = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS);
+        return new File(new File(downloads, "Tales of Maj'Eyal"), "save");
+    }
+
+    private File getPrivateSaveFolder() {
+        return new File(getFilesDir(), ".t-engine/4.0/tome/save");
+    }
+
     private boolean hasAddonsStoragePermission() {
         return checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE)
                         == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -223,6 +367,29 @@ public final class TE4Activity extends SDLActivity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions,
             int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_INITIAL_SAVE_STORAGE) {
+            if (hasAddonsStoragePermission()) {
+                getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
+                        .remove("save_storage_permission_denied").apply();
+                startInitialSaveSync();
+            } else {
+                getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
+                        .putBoolean("save_storage_permission_denied", true).apply();
+                Toast.makeText(this, "Save backup is disabled without storage permission",
+                        Toast.LENGTH_LONG).show();
+                markSaveSyncReady();
+            }
+            return;
+        }
+        if (requestCode == REQUEST_SAVE_MANAGER_STORAGE) {
+            if (hasAddonsStoragePermission()) {
+                showSaveManager();
+            } else {
+                Toast.makeText(this, "Storage permission is required to manage saves",
+                        Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != REQUEST_ADDONS_STORAGE) return;
         if (hasAddonsStoragePermission()) {
             showAddonsManager();
@@ -265,6 +432,188 @@ public final class TE4Activity extends SDLActivity {
         });
     }
 
+    private void startSaveBackupInBackground() {
+        if (!hasAddonsStoragePermission()) return;
+        if (!beginSaveSync()) {
+            Toast.makeText(this, "Save synchronization is already running",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    ensureSaveFolderExists();
+                    int copied = syncSaveDirectory(
+                            getPrivateSaveFolder(), getPublicSaveFolder(), false);
+                    Log.i("TE4", "Backed up " + copied + " game save file(s)");
+                } catch (IOException e) {
+                    Log.e("TE4", "Could not back up game saves", e);
+                    showSaveSyncError("Could not back up game saves");
+                } catch (SecurityException e) {
+                    Log.e("TE4", "Could not access the public save folder", e);
+                    showSaveSyncError("Could not access the save folder");
+                } finally {
+                    endSaveSync();
+                }
+            }
+        }, "TE4 save backup").start();
+    }
+
+    private void startSaveImportInBackground() {
+        if (!hasAddonsStoragePermission()) return;
+        if (!beginSaveSync()) {
+            Toast.makeText(this, "Save synchronization is already running",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        saveImportProgress = new AlertDialog.Builder(this)
+                .setMessage("Importing saves…")
+                .setCancelable(false)
+                .create();
+        saveImportProgress.show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    ensureSaveFolderExists();
+                    int imported = syncSaveDirectory(
+                            getPublicSaveFolder(), getPrivateSaveFolder(), true);
+                    final String message = imported == 0
+                            ? "No save files found in the save folder"
+                            : "Imported " + imported + " save file(s)";
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            finishSaveImportProgress();
+                            Toast.makeText(TE4Activity.this, message, Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } catch (IOException e) {
+                    Log.e("TE4", "Could not import game saves", e);
+                    showSaveSyncError("Could not import game saves");
+                } catch (SecurityException e) {
+                    Log.e("TE4", "Could not access the public save folder", e);
+                    showSaveSyncError("Could not access the save folder");
+                } finally {
+                    endSaveSync();
+                }
+            }
+        }, "TE4 save import").start();
+    }
+
+    private synchronized boolean beginSaveSync() {
+        if (saveSyncInProgress) return false;
+        saveSyncInProgress = true;
+        return true;
+    }
+
+    private synchronized void endSaveSync() {
+        saveSyncInProgress = false;
+    }
+
+    private int syncSaveDirectory(File sourceDirectory, File destinationDirectory,
+            boolean overwrite) throws IOException {
+        if (!sourceDirectory.isDirectory()) return 0;
+        if (!destinationDirectory.isDirectory() && !destinationDirectory.mkdirs()) {
+            throw new IOException("Could not create " + destinationDirectory);
+        }
+
+        File[] entries = sourceDirectory.listFiles();
+        if (entries == null) throw new IOException("Could not list " + sourceDirectory);
+        int copied = 0;
+        for (File entry : entries) {
+            if (SAVE_FOLDER_GUIDE.equals(entry.getName())) continue;
+            copied += syncSaveEntry(entry, new File(destinationDirectory, entry.getName()),
+                    overwrite);
+        }
+        return copied;
+    }
+
+    private int syncSaveEntry(File source, File destination, boolean overwrite)
+            throws IOException {
+        if (source.isDirectory()) {
+            if (destination.exists() && !destination.isDirectory()) {
+                throw new IOException("Save file conflicts with a directory: " + destination);
+            }
+            if (!destination.isDirectory() && !destination.mkdirs()) {
+                throw new IOException("Could not create " + destination);
+            }
+            File[] entries = source.listFiles();
+            if (entries == null) throw new IOException("Could not list " + source);
+            int copied = 0;
+            for (File entry : entries) {
+                copied += syncSaveEntry(entry, new File(destination, entry.getName()), overwrite);
+            }
+            return copied;
+        }
+        if (!source.isFile()) {
+            throw new IOException("Unsupported save entry: " + source);
+        }
+        if (destination.exists() && !destination.isFile()) {
+            throw new IOException("Save directory conflicts with a file: " + destination);
+        }
+        if (!overwrite && destination.isFile()) {
+            long sourceModified = source.lastModified();
+            long destinationModified = destination.lastModified();
+            boolean newer = sourceModified > destinationModified;
+            boolean sameTimeDifferentSize = sourceModified == destinationModified
+                    && source.length() != destination.length();
+            if (!newer && !sameTimeDifferentSize) return 0;
+        }
+
+        copySaveFile(source, destination);
+        return 1;
+    }
+
+    private void copySaveFile(File source, File destination) throws IOException {
+        File temporary = File.createTempFile(
+                "te4-save-", ".tmp", destination.getParentFile());
+        try {
+            long sourceSize = source.length();
+            try (InputStream input = new FileInputStream(source);
+                 FileOutputStream output = new FileOutputStream(temporary)) {
+                byte[] buffer = new byte[32 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    output.write(buffer, 0, count);
+                }
+            }
+            if (temporary.length() != sourceSize || source.length() != sourceSize) {
+                throw new IOException("Save file changed while being copied: " + source.getName());
+            }
+            try {
+                Os.rename(temporary.getAbsolutePath(), destination.getAbsolutePath());
+            } catch (ErrnoException e) {
+                throw new IOException("Could not install save file: " + destination.getName(), e);
+            }
+            if (source.lastModified() > 0) {
+                destination.setLastModified(source.lastModified());
+            }
+        } finally {
+            if (temporary.exists() && !temporary.delete()) {
+                Log.e("TE4", "Could not remove temporary save copy " + temporary.getName());
+            }
+        }
+    }
+
+    private void showSaveSyncError(final String message) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                finishSaveImportProgress();
+                Toast.makeText(TE4Activity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void finishSaveImportProgress() {
+        if (saveImportProgress != null) {
+            if (saveImportProgress.isShowing()) saveImportProgress.dismiss();
+            saveImportProgress = null;
+        }
+    }
+
     public void setDlcButtonVisible(final boolean visible) {
         runOnUiThread(new Runnable() {
             @Override
@@ -272,6 +621,10 @@ public final class TE4Activity extends SDLActivity {
                 if (addonsButton != null) {
                     addonsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
                 }
+                if (saveButton != null) {
+                    saveButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+                }
+                if (visible) startSaveBackupInBackground();
             }
         });
     }
@@ -531,6 +884,21 @@ public final class TE4Activity extends SDLActivity {
                 dp(56), height, Gravity.TOP | Gravity.START);
         padToggleLayout.leftMargin = dp(60);
         addContentView(padToggle, padToggleLayout);
+
+        saveButton = makeControl("SAVE");
+        saveButton.setContentDescription(
+                "Show the game save folder and import or back up saves");
+        saveButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                showSaveManager();
+            }
+        });
+        FrameLayout.LayoutParams saveButtonLayout = new FrameLayout.LayoutParams(
+                dp(72), height, Gravity.TOP | Gravity.END);
+        saveButtonLayout.rightMargin = dp(100);
+        saveButtonLayout.topMargin = dp(6);
+        addContentView(saveButton, saveButtonLayout);
 
         addonsButton = makeControl("ADDONS");
         addonsButton.setContentDescription("Open the add-ons folder and import DLC or add-ons");

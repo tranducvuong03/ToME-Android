@@ -25,6 +25,7 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | `⌨` | Show or hide the on-screen keyboard. |
 | `ESC`, `TAB`, arrow buttons | Send the corresponding game key. |
 | `BAR` | Show or hide the shortcut bar; hold and drag it to reposition it. |
+| `SAVE` | Open the save folder options; shown only in the main menu. |
 | `ADDONS` | Open the add-ons folder/import options; shown only in the main menu. |
 | Hold a built-in key on the shortcut bar, then drag | Reposition the shortcut bar. Release to save its position for future launches. |
 | `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches. |
@@ -38,6 +39,15 @@ when you first open the add-ons menu. Tap **ADDONS** → **Import Add-ons** to
 copy the archives into the game's private `game/addons` folder. Grant storage
 permission when prompted the first time. Restart the game after importing to
 load them.
+
+## Game saves on Android
+
+The app backs up game saves to `Download/Tales of Maj'Eyal/save` when returning
+to the main menu and restores newer files from that folder when the game starts.
+Copy saved characters into this folder to restore them after reinstalling. Use
+**SAVE** → **Import Saves** to import files while the app is already running,
+or **Back Up Now** to copy the current saves immediately. Grant storage
+permission when prompted.
 
 ## Licensing
 
