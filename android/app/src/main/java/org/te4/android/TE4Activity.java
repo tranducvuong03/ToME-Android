@@ -20,14 +20,12 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
-import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.text.InputType;
 import android.view.MotionEvent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
@@ -56,6 +54,7 @@ public final class TE4Activity extends SDLActivity {
     private static final int SDLK_KP_3 = 1073741915;
     private static final int SDLK_KP_7 = 1073741919;
     private static final int SDLK_KP_9 = 1073741921;
+    private static final int SDLK_RETURN = 13;
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
@@ -63,10 +62,6 @@ public final class TE4Activity extends SDLActivity {
     private View barToggle;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
     private boolean textInputEnabled = true;
-    private boolean tapMaySendEnter;
-    private float tapDownX;
-    private float tapDownY;
-    private long tapDownTime;
     private TextView installStatus;
 
     @Override
@@ -203,6 +198,16 @@ public final class TE4Activity extends SDLActivity {
         directionPadLayout.leftMargin = dp(5);
         directionPadLayout.bottomMargin = dp(3);
         addContentView(directionPad, directionPadLayout);
+        directionPad.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                if (directionPad.getWidth() > 0 && directionPad.getHeight() > 0) {
+                    directionPad.removeOnLayoutChangeListener(this);
+                    directionPad.restorePosition();
+                }
+            }
+        });
 
         barToggle = makeControl("BAR");
         barToggle.setOnClickListener(new View.OnClickListener() {
@@ -217,54 +222,12 @@ public final class TE4Activity extends SDLActivity {
         addContentView(barToggle, toggleLayout);
     }
 
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                tapDownX = event.getRawX();
-                tapDownY = event.getRawY();
-                tapDownTime = SystemClock.uptimeMillis();
-                tapMaySendEnter = !isTouchControlAt(tapDownX, tapDownY);
-                break;
-            case MotionEvent.ACTION_MOVE:
-                if (Math.hypot(event.getRawX() - tapDownX, event.getRawY() - tapDownY)
-                        > ViewConfiguration.get(this).getScaledTouchSlop()) {
-                    tapMaySendEnter = false;
-                }
-                break;
-            case MotionEvent.ACTION_POINTER_DOWN:
-            case MotionEvent.ACTION_CANCEL:
-                tapMaySendEnter = false;
-                break;
-            case MotionEvent.ACTION_UP:
-                boolean sendEnter = tapMaySendEnter
-                        && SystemClock.uptimeMillis() - tapDownTime < 500
-                        && !isTouchControlAt(event.getRawX(), event.getRawY());
-                tapMaySendEnter = false;
-                boolean handled = super.dispatchTouchEvent(event);
-                if (sendEnter) nativeSendKey(13);
-                return handled;
-        }
-        return super.dispatchTouchEvent(event);
-    }
-
-    private boolean isTouchControlAt(float screenX, float screenY) {
-        return isInsideView(shortcutBar, screenX, screenY)
-                || isInsideView(directionPad, screenX, screenY)
-                || isInsideView(barToggle, screenX, screenY)
-                || isInsideView(installStatus, screenX, screenY);
-    }
-
-    private boolean isInsideView(View view, float screenX, float screenY) {
-        if (view == null || view.getVisibility() != View.VISIBLE) return false;
-        int[] location = new int[2];
-        view.getLocationOnScreen(location);
-        return screenX >= location[0] && screenX < location[0] + view.getWidth()
-                && screenY >= location[1] && screenY < location[1] + view.getHeight();
-    }
-
     private void addControl(LinearLayout row, String label, final int keycode, boolean keyboard) {
         TextView control = makeControl(label);
+        if (keyboard) {
+            control.setTextSize(20);
+            control.setContentDescription("Toggle on-screen keyboard");
+        }
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(46), dp(38));
         params.setMargins(dp(2), 0, dp(2), 0);
         row.addView(control, params);
@@ -283,7 +246,7 @@ public final class TE4Activity extends SDLActivity {
 
     private void renderCustomShortcuts() {
         shortcutKeys.removeAllViews();
-        addControl(shortcutKeys, "KB", 0, true);
+        addControl(shortcutKeys, "⌨", 0, true);
         addControl(shortcutKeys, "ESC", 27, false);
         addControl(shortcutKeys, "TAB", 9, false);
         addControl(shortcutKeys, "↑", SDLK_UP, false);
@@ -464,20 +427,26 @@ public final class TE4Activity extends SDLActivity {
     private static final class DirectionPadView extends View {
         private static final int NO_KEY = -1;
         private static final int REPEAT_DELAY_MS = 170;
+        private static final int POSITION_HOLD_MS = 500;
+        private static final String PREFERENCES = "te4_controls";
         private static final String[][] DIRECTIONS = {
                 { "↖", "↑", "↗" },
-                { "←", "", "→" },
+                { "←", "↵", "→" },
                 { "↙", "↓", "↘" }
         };
         private static final int[][] KEYCODES = {
                 { SDLK_KP_7, SDLK_UP, SDLK_KP_9 },
-                { SDLK_LEFT, NO_KEY, SDLK_RIGHT },
+                { SDLK_LEFT, SDLK_RETURN, SDLK_RIGHT },
                 { SDLK_KP_1, SDLK_DOWN, SDLK_KP_3 }
         };
 
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Handler handler = new Handler(Looper.getMainLooper());
         private int activeKeycode = NO_KEY;
+        private boolean pointerDown;
+        private boolean positioning;
+        private float dragOffsetX;
+        private float dragOffsetY;
 
         private final Runnable repeatKey = new Runnable() {
             @Override
@@ -489,10 +458,38 @@ public final class TE4Activity extends SDLActivity {
             }
         };
 
+        private final Runnable beginPositioning = new Runnable() {
+            @Override
+            public void run() {
+                if (pointerDown && activeKeycode == SDLK_RETURN) {
+                    positioning = true;
+                    invalidate();
+                }
+            }
+        };
+
         DirectionPadView(TE4Activity context) {
             super(context);
             setClickable(true);
-            setContentDescription("Eight-direction pad");
+            setContentDescription("Eight-direction pad; tap the center for Enter, hold the center to move the pad");
+        }
+
+        void restorePosition() {
+            ViewGroup parent = (ViewGroup) getParent();
+            if (parent == null || parent.getWidth() == 0 || parent.getHeight() == 0) return;
+
+            android.content.SharedPreferences preferences =
+                    getContext().getSharedPreferences(PREFERENCES, android.content.Context.MODE_PRIVATE);
+            if (!preferences.contains("pad_x") || !preferences.contains("pad_y")) return;
+
+            int maxX = Math.max(0, parent.getWidth() - getWidth());
+            int maxY = Math.max(0, parent.getHeight() - getHeight());
+            moveTo(maxX * clampFraction(preferences.getFloat("pad_x", 0f)),
+                    maxY * clampFraction(preferences.getFloat("pad_y", 1f)));
+        }
+
+        private float clampFraction(float fraction) {
+            return Math.max(0f, Math.min(1f, fraction));
         }
 
         @Override
@@ -515,7 +512,8 @@ public final class TE4Activity extends SDLActivity {
                     float right = (column + 1) * cellWidth - gap;
                     float bottom = (row + 1) * cellHeight - gap;
                     paint.setStyle(Paint.Style.FILL);
-                    paint.setColor(keycode == activeKeycode ? 0xCC777777 : 0x88707070);
+                    paint.setColor(keycode == activeKeycode || (positioning && keycode == SDLK_RETURN)
+                            ? 0xCC777777 : 0x88707070);
                     canvas.drawRoundRect(left, top, right, bottom, dp(5), dp(5), paint);
 
                     paint.setStyle(Paint.Style.STROKE);
@@ -525,9 +523,12 @@ public final class TE4Activity extends SDLActivity {
 
                     paint.setStyle(Paint.Style.FILL);
                     paint.setColor(Color.WHITE);
+                    String label = positioning && keycode == SDLK_RETURN
+                            ? "MOVE" : DIRECTIONS[row][column];
+                    paint.setTextSize(positioning && keycode == SDLK_RETURN ? dp(13) : dp(24));
                     float textY = (top + bottom) / 2f
                             - (paint.ascent() + paint.descent()) / 2f;
-                    canvas.drawText(DIRECTIONS[row][column],
+                    canvas.drawText(label,
                             (left + right) / 2f, textY, paint);
                 }
             }
@@ -537,12 +538,28 @@ public final class TE4Activity extends SDLActivity {
         public boolean onTouchEvent(MotionEvent event) {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
+                    pointerDown = true;
+                    dragOffsetX = event.getX();
+                    dragOffsetY = event.getY();
+                    updateDirection(event.getX(), event.getY());
+                    return true;
                 case MotionEvent.ACTION_MOVE:
+                    if (positioning) {
+                        moveToScreen(event.getRawX(), event.getRawY());
+                        return true;
+                    }
                     updateDirection(event.getX(), event.getY());
                     return true;
                 case MotionEvent.ACTION_UP:
+                    if (activeKeycode == SDLK_RETURN && !positioning) {
+                        nativeSendKey(SDLK_RETURN);
+                    }
+                    if (positioning) savePosition();
+                    releaseDirection();
+                    return true;
                 case MotionEvent.ACTION_CANCEL:
                 case MotionEvent.ACTION_POINTER_UP:
+                    if (positioning) savePosition();
                     releaseDirection();
                     return true;
                 default:
@@ -553,6 +570,7 @@ public final class TE4Activity extends SDLActivity {
         @Override
         protected void onDetachedFromWindow() {
             handler.removeCallbacks(repeatKey);
+            handler.removeCallbacks(beginPositioning);
             super.onDetachedFromWindow();
         }
 
@@ -563,8 +581,11 @@ public final class TE4Activity extends SDLActivity {
             int nextKeycode = KEYCODES[row][column];
             if (nextKeycode != activeKeycode) {
                 handler.removeCallbacks(repeatKey);
+                handler.removeCallbacks(beginPositioning);
                 activeKeycode = nextKeycode;
-                if (activeKeycode != NO_KEY) {
+                if (activeKeycode == SDLK_RETURN) {
+                    handler.postDelayed(beginPositioning, POSITION_HOLD_MS);
+                } else if (activeKeycode != NO_KEY) {
                     nativeSendKey(activeKeycode);
                     handler.postDelayed(repeatKey, REPEAT_DELAY_MS);
                 }
@@ -574,8 +595,50 @@ public final class TE4Activity extends SDLActivity {
 
         private void releaseDirection() {
             handler.removeCallbacks(repeatKey);
+            handler.removeCallbacks(beginPositioning);
             activeKeycode = NO_KEY;
+            pointerDown = false;
+            positioning = false;
             invalidate();
+        }
+
+        private void moveToScreen(float screenX, float screenY) {
+            ViewGroup parent = (ViewGroup) getParent();
+            if (parent == null) return;
+            int[] parentLocation = new int[2];
+            parent.getLocationOnScreen(parentLocation);
+            moveTo(screenX - parentLocation[0] - dragOffsetX,
+                    screenY - parentLocation[1] - dragOffsetY);
+        }
+
+        private void moveTo(float x, float y) {
+            ViewGroup parent = (ViewGroup) getParent();
+            if (parent == null) return;
+            int maxX = Math.max(0, parent.getWidth() - getWidth());
+            int maxY = Math.max(0, parent.getHeight() - getHeight());
+            int left = Math.max(0, Math.min(maxX, Math.round(x)));
+            int top = Math.max(0, Math.min(maxY, Math.round(y)));
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) getLayoutParams();
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.leftMargin = left;
+            params.topMargin = top;
+            params.rightMargin = 0;
+            params.bottomMargin = 0;
+            setLayoutParams(params);
+        }
+
+        private void savePosition() {
+            ViewGroup parent = (ViewGroup) getParent();
+            if (parent == null) return;
+            int maxX = Math.max(1, parent.getWidth() - getWidth());
+            int maxY = Math.max(1, parent.getHeight() - getHeight());
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) getLayoutParams();
+            boolean saved = getContext().getSharedPreferences(
+                    PREFERENCES, android.content.Context.MODE_PRIVATE).edit()
+                    .putFloat("pad_x", (float) params.leftMargin / maxX)
+                    .putFloat("pad_y", (float) params.topMargin / maxY)
+                    .commit();
+            if (!saved) Log.e("TE4", "Could not save direction pad position");
         }
 
         private float dp(float value) {
