@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <SDL.h>
+#include <SDL_system.h>
 
 static void pushKeyEvent(Uint32 type, SDL_Keycode keycode)
 {
@@ -41,6 +42,47 @@ Java_org_te4_android_TE4Activity_nativeSetTextInput(JNIEnv *env, jclass type, jb
 
 	if (enabled) SDL_StartTextInput();
 	else SDL_StopTextInput();
+}
+
+void TE4AndroidSetDlcButtonVisible(int visible)
+{
+	JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	jobject activity = SDL_AndroidGetActivity();
+	jclass activityClass;
+	jmethodID setVisibility;
+
+	if (!env || !activity) {
+		fprintf(stderr, "Could not access the Android activity for DLC button visibility\n");
+		return;
+	}
+
+	activityClass = (*env)->GetObjectClass(env, activity);
+	if (!activityClass) {
+		fprintf(stderr, "Could not resolve the Android activity class\n");
+		(*env)->DeleteLocalRef(env, activity);
+		return;
+	}
+
+	setVisibility = (*env)->GetMethodID(env, activityClass,
+			"setDlcButtonVisible", "(Z)V");
+	if (!setVisibility) {
+		fprintf(stderr, "Could not resolve setDlcButtonVisible on the Android activity\n");
+		if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+		(*env)->DeleteLocalRef(env, activityClass);
+		(*env)->DeleteLocalRef(env, activity);
+		return;
+	}
+
+	(*env)->CallVoidMethod(env, activity, setVisibility,
+			visible ? JNI_TRUE : JNI_FALSE);
+	if ((*env)->ExceptionCheck(env)) {
+		fprintf(stderr, "Could not update Android DLC button visibility\n");
+		(*env)->ExceptionDescribe(env);
+		(*env)->ExceptionClear(env);
+	}
+
+	(*env)->DeleteLocalRef(env, activityClass);
+	(*env)->DeleteLocalRef(env, activity);
 }
 
 JNIEXPORT jboolean JNICALL
