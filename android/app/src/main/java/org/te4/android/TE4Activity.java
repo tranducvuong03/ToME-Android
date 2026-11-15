@@ -1,13 +1,10 @@
 package org.te4.android;
 
 import android.app.AlertDialog;
-import android.content.ActivityNotFoundException;
 import android.content.ContentUris;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.DialogInterface;
-import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.AssetManager;
 import android.database.Cursor;
@@ -23,7 +20,6 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
-import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.system.ErrnoException;
 import android.system.Os;
@@ -42,12 +38,24 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -63,10 +71,10 @@ public final class TE4Activity extends SDLActivity {
     private static final int SDLK_KP_7 = 1073741919;
     private static final int SDLK_KP_9 = 1073741921;
     private static final int SDLK_RETURN = 13;
-    private static final int REQUEST_DLC_FOLDER = 0x5444;
-    private static final String DLC_PREFERENCES = "te4_dlc";
-    private static final String DLC_FOLDER_URI = "folder_uri";
-    private static final String DLC_FOLDER_PATH = "Download/Tales of Maj'Eyal/DLC";
+    private static final int REQUEST_ADDONS_STORAGE = 0x5445;
+    private static final String ADDONS_FOLDER_PATH = "Download/Tales of Maj'Eyal/addons";
+    private static final String ADDONS_FOLDER_GUIDE =
+            "Place .teaac DLC and .teaa add-on files here.txt";
     private static final String GAME_ARCHIVE_UPDATE_MARKER =
             ".te4-game-archives-update-v4";
 
@@ -74,16 +82,16 @@ public final class TE4Activity extends SDLActivity {
     private LinearLayout shortcutKeys;
     private DirectionPadView directionPad;
     private View barToggle;
-    private View dlcButton;
+    private View padToggle;
+    private View addonsButton;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
+    private Map<String, ShortcutActionBinding> shortcutActionBindings;
     private TextView installStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         ParcelFileDescriptor logFile = null;
         boolean gameArchiveUpdateFailed = false;
-        boolean dlcImportFailed = false;
-        int importedDlcCount = 0;
         try {
             logFile = openPublicLogFile();
         } catch (IOException e) {
@@ -115,17 +123,6 @@ public final class TE4Activity extends SDLActivity {
                 gameArchiveUpdateFailed = true;
             }
         }
-        if (gameDataMarker.isFile()) {
-            try {
-                importedDlcCount = importSavedDlcArchives();
-            } catch (IOException e) {
-                Log.e("TE4", "Could not import DLC archives", e);
-                dlcImportFailed = true;
-            } catch (SecurityException e) {
-                Log.e("TE4", "Could not access the selected DLC folder", e);
-                dlcImportFailed = true;
-            }
-        }
         super.onCreate(savedInstanceState);
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         if (logFile != null) {
@@ -147,13 +144,6 @@ public final class TE4Activity extends SDLActivity {
         if (gameArchiveUpdateFailed) {
             Toast.makeText(this, "Could not update game files", Toast.LENGTH_LONG).show();
         }
-        if (dlcImportFailed) {
-            Toast.makeText(this, "Could not read the DLC folder; select it again",
-                    Toast.LENGTH_LONG).show();
-        } else if (importedDlcCount > 0) {
-            Toast.makeText(this, "Imported " + importedDlcCount + " DLC package(s)",
-                    Toast.LENGTH_LONG).show();
-        }
         if (!gameDataMarker.isFile()) {
             installStatus = makeControl("Preparing game data…");
             FrameLayout.LayoutParams statusLayout = new FrameLayout.LayoutParams(
@@ -172,143 +162,141 @@ public final class TE4Activity extends SDLActivity {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_DLC_FOLDER || resultCode != RESULT_OK || data == null) return;
-
-        Uri folder = data.getData();
-        int accessFlags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
-        if (folder == null || (accessFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) {
-            Toast.makeText(this, "No readable DLC folder was selected", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        SharedPreferences preferences = getSharedPreferences(
-                DLC_PREFERENCES, MODE_PRIVATE);
-        String oldFolder = preferences.getString(DLC_FOLDER_URI, null);
-        try {
-            getContentResolver().takePersistableUriPermission(folder, accessFlags);
-            if (!preferences.edit().putString(DLC_FOLDER_URI, folder.toString()).commit()) {
-                throw new IOException("Could not save the selected DLC folder");
-            }
-            if (oldFolder != null && !oldFolder.equals(folder.toString())) {
-                try {
-                    getContentResolver().releasePersistableUriPermission(
-                            Uri.parse(oldFolder), Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                } catch (SecurityException e) {
-                    Log.w("TE4", "Could not release the previous DLC folder permission", e);
-                }
-            }
-            if (!new File(getFilesDir(), ".te4-data-installed").isFile()) {
-                Toast.makeText(this, "DLC folder saved; import will run next time the game starts",
-                        Toast.LENGTH_LONG).show();
-                return;
-            }
-            showDlcImportResult(importDlcArchives(folder), true);
-        } catch (IOException e) {
-            Log.e("TE4", "Could not import DLC archives", e);
-            Toast.makeText(this, "Could not import DLC files", Toast.LENGTH_LONG).show();
-        } catch (SecurityException e) {
-            Log.e("TE4", "Could not access the selected DLC folder", e);
-            Toast.makeText(this, "Could not access the DLC folder", Toast.LENGTH_LONG).show();
-        }
-    }
-
     private static native void nativeSendKey(int keycode);
     private static native void nativeSetTextInput(boolean enabled);
     private static native boolean nativeRedirectLog(int fd);
 
-    private void showDlcManager() {
-        Uri configuredFolder = getSavedDlcFolder();
-        boolean hasFolder = configuredFolder != null;
-        String message = "Download DLC archives (.teaac) and put them in:\n\n"
-                + DLC_FOLDER_PATH
-                + "\n\nChoose this folder once. New packages are imported automatically "
-                + "when the game starts. You can also import now; restart the game afterward "
-                + "to load them."
-                + (hasFolder
-                        ? "\n\nSelected folder: " + getDlcFolderDisplayPath(configuredFolder)
-                        : "\n\nDLC folder is not configured.");
+    private void showAddonsManager() {
+        if (!hasAddonsStoragePermission()) {
+            requestPermissions(new String[] {
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }, REQUEST_ADDONS_STORAGE);
+            return;
+        }
+        try {
+            ensureAddonsFolderExists();
+        } catch (IOException e) {
+            Log.e("TE4", "Could not create the public add-ons folder", e);
+            Toast.makeText(this, "Could not create the add-ons folder", Toast.LENGTH_LONG).show();
+            return;
+        } catch (SecurityException e) {
+            Log.e("TE4", "Could not access the public add-ons folder", e);
+            Toast.makeText(this, "Could not access the add-ons folder", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        String message = "Put DLC archives (.teaac) and add-on archives (.teaa) in:\n\n"
+                + ADDONS_FOLDER_PATH
+                + "\n\nThe folder is ready. Tap Import Add-ons to copy packages "
+                + "into the game. Restart the game afterward to load them.";
 
         new AlertDialog.Builder(this)
-                .setTitle("DLC folder")
+                .setTitle("Add-ons folder")
                 .setMessage(message)
-                .setPositiveButton("Choose folder", new DialogInterface.OnClickListener() {
+                .setPositiveButton("Import Add-ons", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        chooseDlcFolder();
-                    }
-                })
-                .setNeutralButton("Import now", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        Uri folder = getSavedDlcFolder();
-                        if (folder == null) {
-                            chooseDlcFolder();
-                            return;
-                        }
-                        try {
-                            showDlcImportResult(importDlcArchives(folder), true);
-                        } catch (IOException e) {
-                            Log.e("TE4", "Could not import DLC archives", e);
-                            Toast.makeText(TE4Activity.this, "Could not import DLC files",
-                                    Toast.LENGTH_LONG).show();
-                        } catch (SecurityException e) {
-                            Log.e("TE4", "Could not access the selected DLC folder", e);
-                            Toast.makeText(TE4Activity.this, "Could not access the DLC folder",
-                                    Toast.LENGTH_LONG).show();
-                        }
+                        startAddonsImport();
                     }
                 })
                 .setNegativeButton("Close", null)
                 .show();
     }
 
+    private boolean hasAddonsStoragePermission() {
+        return checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void startAddonsImport() {
+        if (!hasAddonsStoragePermission()) {
+            showAddonsManager();
+            return;
+        }
+        importAddonsInBackground();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_ADDONS_STORAGE) return;
+        if (hasAddonsStoragePermission()) {
+            showAddonsManager();
+        } else {
+            Toast.makeText(this, "Storage permission is required to import add-ons",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void importAddonsInBackground() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    ensureAddonsFolderExists();
+                    final int imported = importAddonArchives();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            showAddonImportResult(imported, true);
+                        }
+                    });
+                } catch (IOException e) {
+                    Log.e("TE4", "Could not import add-on archives", e);
+                    showAddonImportError("Could not import add-on files");
+                } catch (SecurityException e) {
+                    Log.e("TE4", "Could not access the add-ons folder", e);
+                    showAddonImportError("Could not access the add-ons folder");
+                }
+            }
+        }, "TE4 add-on importer").start();
+    }
+
+    private void showAddonImportError(final String message) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(TE4Activity.this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
     public void setDlcButtonVisible(final boolean visible) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (dlcButton != null) {
-                    dlcButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+                if (addonsButton != null) {
+                    addonsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
                 }
             }
         });
     }
 
-    private String getDlcFolderDisplayPath(Uri treeUri) {
-        String documentId = DocumentsContract.getTreeDocumentId(treeUri);
-        int volumeSeparator = documentId.indexOf(':');
-        return volumeSeparator >= 0
-                ? documentId.substring(volumeSeparator + 1) : documentId;
-    }
-
-    private void chooseDlcFolder() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        try {
-            startActivityForResult(intent, REQUEST_DLC_FOLDER);
-        } catch (ActivityNotFoundException e) {
-            Log.e("TE4", "No document picker is available for DLC folders", e);
-            Toast.makeText(this, "No folder picker is available on this device",
-                    Toast.LENGTH_LONG).show();
+    private void ensureAddonsFolderExists() throws IOException {
+        File folder = getLegacyAddonsFolder();
+        if (!folder.isDirectory() && !folder.mkdirs()) {
+            throw new IOException("Could not create the add-ons folder");
+        }
+        File guide = new File(folder, ADDONS_FOLDER_GUIDE);
+        if (!guide.isFile() || guide.length() == 0) {
+            try (FileOutputStream output = new FileOutputStream(guide)) {
+                output.write(("Put .teaac DLC and .teaa add-on archives in this folder.\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
         }
     }
 
-    private Uri getSavedDlcFolder() {
-        String saved = getSharedPreferences(DLC_PREFERENCES, MODE_PRIVATE)
-                .getString(DLC_FOLDER_URI, null);
-        if (saved == null) return null;
-        return Uri.parse(saved);
+    private File getLegacyAddonsFolder() {
+        File downloads = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS);
+        return new File(new File(downloads, "Tales of Maj'Eyal"), "addons");
     }
 
-    private int importSavedDlcArchives() throws IOException {
-        Uri folder = getSavedDlcFolder();
-        return folder == null ? 0 : importDlcArchives(folder);
-    }
-
-    private int importDlcArchives(Uri treeUri) throws IOException {
+    private int importAddonArchives() throws IOException {
         if (!new File(getFilesDir(), ".te4-data-installed").isFile()) {
             throw new IOException("Game data is not installed yet");
         }
@@ -317,95 +305,71 @@ public final class TE4Activity extends SDLActivity {
             throw new IOException("Could not create the game addon directory");
         }
 
-        String documentId = DocumentsContract.getTreeDocumentId(treeUri);
-        Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId);
-        String[] projection = {
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE,
-                DocumentsContract.Document.COLUMN_LAST_MODIFIED
-        };
-        ContentResolver resolver = getContentResolver();
+        File[] files = getLegacyAddonsFolder().listFiles();
+        if (files == null) throw new IOException("Could not list the add-ons folder");
+
         int imported = 0;
-        try (Cursor cursor = resolver.query(childrenUri, projection, null, null, null)) {
-            if (cursor == null) throw new IOException("Could not list the DLC folder");
-
-            int idColumn = cursor.getColumnIndexOrThrow(
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID);
-            int nameColumn = cursor.getColumnIndexOrThrow(
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME);
-            int typeColumn = cursor.getColumnIndexOrThrow(
-                    DocumentsContract.Document.COLUMN_MIME_TYPE);
-            int sizeColumn = cursor.getColumnIndex(
-                    DocumentsContract.Document.COLUMN_SIZE);
-            int modifiedColumn = cursor.getColumnIndex(
-                    DocumentsContract.Document.COLUMN_LAST_MODIFIED);
-
-            while (cursor.moveToNext()) {
-                String name = cursor.getString(nameColumn);
-                String mimeType = cursor.getString(typeColumn);
-                if (name == null || DocumentsContract.Document.MIME_TYPE_DIR.equals(mimeType)
-                        || name.contains("/") || name.contains("\\")
-                        || !name.toLowerCase(Locale.ROOT).endsWith(".teaac")) {
-                    continue;
-                }
-
-                long sourceSize = sizeColumn >= 0 && !cursor.isNull(sizeColumn)
-                        ? cursor.getLong(sizeColumn) : -1;
-                long sourceModified = modifiedColumn >= 0 && !cursor.isNull(modifiedColumn)
-                        ? cursor.getLong(modifiedColumn) : 0;
-                File destination = new File(addonsDirectory, name);
-                if (destination.isFile()
-                        && (sourceSize < 0 || destination.length() == sourceSize)
-                        && (sourceModified <= 0
-                                || destination.lastModified() >= sourceModified)) {
-                    continue;
-                }
-
-                File temporary = new File(addonsDirectory, name + ".import.tmp");
-                if (temporary.exists() && !temporary.delete()) {
-                    throw new IOException("Could not remove an incomplete DLC import");
-                }
-                Uri documentUri = DocumentsContract.buildDocumentUriUsingTree(
-                        treeUri, cursor.getString(idColumn));
-                try {
-                    InputStream input = resolver.openInputStream(documentUri);
-                    if (input == null) throw new IOException("Could not open DLC archive: " + name);
-                    try (InputStream source = input;
-                            FileOutputStream output = new FileOutputStream(temporary)) {
-                        byte[] buffer = new byte[32 * 1024];
-                        int count;
-                        while ((count = source.read(buffer)) != -1) {
-                            output.write(buffer, 0, count);
-                        }
-                    }
-                    if (sourceSize >= 0 && temporary.length() != sourceSize) {
-                        throw new IOException("DLC archive size mismatch: " + name);
-                    }
-                    try {
-                        Os.rename(temporary.getAbsolutePath(), destination.getAbsolutePath());
-                    } catch (ErrnoException e) {
-                        throw new IOException("Could not install DLC archive: " + name, e);
-                    }
-                    if (sourceModified > 0) destination.setLastModified(sourceModified);
+        for (File file : files) {
+            if (!file.isFile() || !isAddonArchive(file.getName())) continue;
+            try (InputStream input = new FileInputStream(file)) {
+                if (importAddonArchive(addonsDirectory, file.getName(), file.length(),
+                        file.lastModified(), input)) {
                     imported++;
-                } finally {
-                    if (temporary.exists() && !temporary.delete()) {
-                        Log.e("TE4", "Could not remove temporary DLC archive " + name);
-                    }
                 }
             }
         }
         return imported;
     }
 
-    private void showDlcImportResult(int imported, boolean needsRestart) {
+    private boolean importAddonArchive(File addonsDirectory, String name, long sourceSize,
+            long sourceModified, InputStream input) throws IOException {
+        File destination = new File(addonsDirectory, name);
+        File temporary = new File(addonsDirectory, name + ".import.tmp");
+        try (InputStream source = input) {
+            if (destination.isFile()
+                    && (sourceSize < 0 || destination.length() == sourceSize)
+                    && (sourceModified <= 0 || destination.lastModified() >= sourceModified)) {
+                return false;
+            }
+            if (temporary.exists() && !temporary.delete()) {
+                throw new IOException("Could not remove an incomplete add-on import");
+            }
+            try (FileOutputStream output = new FileOutputStream(temporary)) {
+                byte[] buffer = new byte[32 * 1024];
+                int count;
+                while ((count = source.read(buffer)) != -1) {
+                    output.write(buffer, 0, count);
+                }
+            }
+            if (sourceSize >= 0 && temporary.length() != sourceSize) {
+                throw new IOException("Add-on archive size mismatch: " + name);
+            }
+            try {
+                Os.rename(temporary.getAbsolutePath(), destination.getAbsolutePath());
+            } catch (ErrnoException e) {
+                throw new IOException("Could not install add-on archive: " + name, e);
+            }
+            if (sourceModified > 0) destination.setLastModified(sourceModified);
+            return true;
+        } finally {
+            if (temporary.exists() && !temporary.delete()) {
+                Log.e("TE4", "Could not remove temporary add-on archive " + name);
+            }
+        }
+    }
+
+    private boolean isAddonArchive(String name) {
+        return name != null && !name.contains("/") && !name.contains("\\")
+                && (name.toLowerCase(Locale.ROOT).endsWith(".teaac")
+                        || name.toLowerCase(Locale.ROOT).endsWith(".teaa"));
+    }
+
+    private void showAddonImportResult(int imported, boolean needsRestart) {
         if (imported == 0) {
-            Toast.makeText(this, "No new .teaac DLC archives found",
+            Toast.makeText(this, "No new .teaac or .teaa archives found",
                     Toast.LENGTH_LONG).show();
         } else {
-            String message = "Imported " + imported + " DLC package(s)";
+            String message = "Imported " + imported + " add-on package(s)";
             if (needsRestart) message += "; restart the game to load them";
             Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         }
@@ -517,6 +481,8 @@ public final class TE4Activity extends SDLActivity {
                 "Shortcut bar; hold a built-in key or blank area to move the bar");
 
         directionPad = new DirectionPadView(this);
+        directionPad.setVisibility(getSharedPreferences("te4_controls", MODE_PRIVATE)
+                .getBoolean("direction_pad_visible", true) ? View.VISIBLE : View.GONE);
         FrameLayout.LayoutParams directionPadLayout = new FrameLayout.LayoutParams(
                 dp(144), dp(144), Gravity.BOTTOM | Gravity.START);
         directionPadLayout.leftMargin = dp(5);
@@ -548,20 +514,38 @@ public final class TE4Activity extends SDLActivity {
         addContentView(barToggle, toggleLayout);
         restoreOverlayWhenLaidOut(barToggle, "bar_toggle", false);
 
-        dlcButton = makeControl("DLC");
-        dlcButton.setContentDescription("Show the DLC folder and import downloaded DLC");
-        dlcButton.setOnClickListener(new View.OnClickListener() {
+        padToggle = makeControl("PAD");
+        padToggle.setContentDescription("Show or hide the eight-direction pad");
+        padToggle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                showDlcManager();
+                boolean visible = directionPad.getVisibility() != View.VISIBLE;
+                directionPad.setVisibility(visible ? View.VISIBLE : View.GONE);
+                if (!getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
+                        .putBoolean("direction_pad_visible", visible).commit()) {
+                    Log.e("TE4", "Could not save direction pad visibility");
+                }
             }
         });
-        FrameLayout.LayoutParams dlcButtonLayout = new FrameLayout.LayoutParams(
-                dp(64), height, Gravity.TOP | Gravity.END);
-        dlcButtonLayout.rightMargin = dp(6);
-        dlcButtonLayout.topMargin = dp(6);
-        addContentView(dlcButton, dlcButtonLayout);
-        dlcButton.setVisibility(View.VISIBLE);
+        FrameLayout.LayoutParams padToggleLayout = new FrameLayout.LayoutParams(
+                dp(56), height, Gravity.TOP | Gravity.START);
+        padToggleLayout.leftMargin = dp(60);
+        addContentView(padToggle, padToggleLayout);
+
+        addonsButton = makeControl("ADDONS");
+        addonsButton.setContentDescription("Open the add-ons folder and import DLC or add-ons");
+        addonsButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                showAddonsManager();
+            }
+        });
+        FrameLayout.LayoutParams addonsButtonLayout = new FrameLayout.LayoutParams(
+                dp(88), height, Gravity.TOP | Gravity.END);
+        addonsButtonLayout.rightMargin = dp(6);
+        addonsButtonLayout.topMargin = dp(6);
+        addContentView(addonsButton, addonsButtonLayout);
+        addonsButton.setVisibility(View.VISIBLE);
 
     }
 
@@ -610,10 +594,12 @@ public final class TE4Activity extends SDLActivity {
                     nativeSendKey(shortcut.keycode);
                 }
             });
+            control.setContentDescription(
+                    "Shortcut " + shortcut.label + "; hold to view its game action or delete it");
             control.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View view) {
-                    confirmDeleteShortcut(shortcut);
+                    showShortcutInfo(shortcut);
                     return true;
                 }
             });
@@ -857,24 +843,173 @@ public final class TE4Activity extends SDLActivity {
         dialog.show();
     }
 
-    private void confirmDeleteShortcut(final Shortcut shortcut) {
+    private void showShortcutInfo(final Shortcut shortcut) {
+        String action;
+        try {
+            action = findShortcutActions(shortcut.keycode);
+        } catch (IOException e) {
+            Log.e("TE4", "Could not read the game's key bindings", e);
+            action = null;
+        }
+
+        String message;
+        if (action == null) {
+            message = "Could not read the game's key bindings.";
+        } else if (action.isEmpty()) {
+            message = "No action is assigned to this key in the game's Key bindings.";
+        } else {
+            message = "Assigned action(s): " + action;
+        }
+
         new AlertDialog.Builder(this)
-                .setMessage("Delete shortcut \"" + shortcut.label + "\"?")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
+                .setTitle("Shortcut " + shortcut.label)
+                .setMessage(message)
+                .setNegativeButton("Close", null)
+                .setPositiveButton("Delete shortcut", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        int index = customShortcuts.indexOf(shortcut);
-                        customShortcuts.remove(shortcut);
-                        if (!saveCustomShortcuts()) {
-                            customShortcuts.add(index, shortcut);
-                            Toast.makeText(TE4Activity.this, "Could not save changes",
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                        renderCustomShortcuts();
+                        deleteShortcut(shortcut);
                     }
                 })
                 .show();
+    }
+
+    private void deleteShortcut(Shortcut shortcut) {
+        int index = customShortcuts.indexOf(shortcut);
+        customShortcuts.remove(shortcut);
+        if (!saveCustomShortcuts()) {
+            customShortcuts.add(index, shortcut);
+            Toast.makeText(this, "Could not save changes", Toast.LENGTH_SHORT).show();
+        }
+        renderCustomShortcuts();
+    }
+
+    private String findShortcutActions(int keycode) throws IOException {
+        if (shortcutActionBindings == null) {
+            shortcutActionBindings = loadShortcutActionBindings();
+        }
+
+        Map<String, List<String>> remappedBindings = loadRemappedKeyBindings();
+        LinkedHashSet<String> actions = new LinkedHashSet<>();
+        for (Map.Entry<String, ShortcutActionBinding> entry
+                : shortcutActionBindings.entrySet()) {
+            ShortcutActionBinding action = entry.getValue();
+            List<String> bindings = remappedBindings.containsKey(entry.getKey())
+                    ? remappedBindings.get(entry.getKey()) : action.defaultBindings;
+            for (String binding : bindings) {
+                if (isShortcutBinding(binding, keycode)) {
+                    actions.add(action.name);
+                    break;
+                }
+            }
+        }
+
+        StringBuilder description = new StringBuilder();
+        for (String action : actions) {
+            if (description.length() > 0) description.append(", ");
+            description.append(action);
+        }
+        return description.toString();
+    }
+
+    private Map<String, ShortcutActionBinding> loadShortcutActionBindings()
+            throws IOException {
+        Map<String, ShortcutActionBinding> actions = new HashMap<>();
+        readKeyBindingArchive(new File(getFilesDir(), "game/engines/te4-1.7.6.teae"),
+                actions);
+        readKeyBindingArchive(new File(getFilesDir(), "game/modules/tome-1.7.6.team"),
+                actions);
+        return actions;
+    }
+
+    private void readKeyBindingArchive(File archiveFile,
+            Map<String, ShortcutActionBinding> actions) throws IOException {
+        Pattern actionPattern = Pattern.compile("(?ms)^defineAction\\s*\\{(.*?)^\\}");
+        Pattern typePattern = Pattern.compile("(?m)^\\s*type\\s*=\\s*\"([^\"]+)\"");
+        Pattern namePattern = Pattern.compile("(?m)^\\s*name\\s*=\\s*(?:_t)?\"([^\"]+)\"");
+        Pattern defaultsPattern = Pattern.compile("(?s)\\bdefault\\s*=\\s*\\{([^}]*)\\}");
+        Pattern quotedValuePattern = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
+
+        try (ZipFile archive = new ZipFile(archiveFile)) {
+            Enumeration<? extends ZipEntry> entries = archive.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (entry.isDirectory()
+                        || !entry.getName().matches("data/keybinds/[^/]+\\.lua")) {
+                    continue;
+                }
+
+                String source = readUtf8(archive.getInputStream(entry));
+                Matcher actionMatcher = actionPattern.matcher(source);
+                while (actionMatcher.find()) {
+                    String definition = actionMatcher.group(1);
+                    Matcher typeMatcher = typePattern.matcher(definition);
+                    Matcher nameMatcher = namePattern.matcher(definition);
+                    Matcher defaultsMatcher = defaultsPattern.matcher(definition);
+                    if (!typeMatcher.find() || !nameMatcher.find()
+                            || !defaultsMatcher.find()) {
+                        continue;
+                    }
+
+                    List<String> defaults = new ArrayList<>();
+                    Matcher valueMatcher = quotedValuePattern.matcher(defaultsMatcher.group(1));
+                    while (valueMatcher.find()) defaults.add(valueMatcher.group(1));
+                    actions.put(typeMatcher.group(1),
+                            new ShortcutActionBinding(nameMatcher.group(1), defaults));
+                }
+            }
+        }
+    }
+
+    private String readUtf8(InputStream input) throws IOException {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
+            StringBuilder contents = new StringBuilder();
+            char[] buffer = new char[4096];
+            int count;
+            while ((count = reader.read(buffer)) != -1) {
+                contents.append(buffer, 0, count);
+            }
+            return contents.toString();
+        }
+    }
+
+    private Map<String, List<String>> loadRemappedKeyBindings() throws IOException {
+        Map<String, List<String>> remappedBindings = new HashMap<>();
+        File remapFile = new File(getFilesDir(), ".t-engine/4.0/tome/keybinds2.cfg");
+        if (!remapFile.isFile()) return remappedBindings;
+
+        Pattern remapPattern = Pattern.compile("^\\s*([A-Za-z0-9_]+)\\s*=\\s*\\{([^}]*)\\}");
+        Pattern quotedValuePattern = Pattern.compile("\"((?:\\\\.|[^\"\\\\])*)\"");
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new FileInputStream(remapFile), java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                Matcher remapMatcher = remapPattern.matcher(line);
+                if (!remapMatcher.find()) continue;
+
+                List<String> bindings = new ArrayList<>();
+                Matcher valueMatcher = quotedValuePattern.matcher(remapMatcher.group(2));
+                while (valueMatcher.find()) bindings.add(valueMatcher.group(1));
+                remappedBindings.put(remapMatcher.group(1), bindings);
+            }
+        }
+        return remappedBindings;
+    }
+
+    private boolean isShortcutBinding(String binding, int keycode) {
+        String key = null;
+        if (binding.startsWith("sym:=")) {
+            if (!binding.endsWith(":false:false:false:false")) return false;
+            key = binding.substring(5, binding.indexOf(':', 5));
+        } else if (binding.startsWith("sym:")) {
+            if (!binding.endsWith(":false:false:false:false")) return false;
+            key = binding.substring(4, binding.indexOf(':', 4));
+        } else if (binding.startsWith("uni:")) {
+            key = binding.substring(4);
+        }
+        return key != null && key.codePointCount(0, key.length()) == 1
+                && key.codePointAt(0) == keycode;
     }
 
     private void loadCustomShortcuts() {
@@ -931,6 +1066,16 @@ public final class TE4Activity extends SDLActivity {
         Shortcut(String label, int keycode) {
             this.label = label;
             this.keycode = keycode;
+        }
+    }
+
+    private static final class ShortcutActionBinding {
+        final String name;
+        final List<String> defaultBindings;
+
+        ShortcutActionBinding(String name, List<String> defaultBindings) {
+            this.name = name;
+            this.defaultBindings = defaultBindings;
         }
     }
 
