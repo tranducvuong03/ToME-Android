@@ -49,6 +49,15 @@ jobs:
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
+      - name: Symbolize reported native crash
+        run: |
+          so=$(find android/app/.cxx -name libmain.so -path '*arm64-v8a*' -print -quit)
+          test -n "$so"
+          addr2line=$(find "$ANDROID_HOME/ndk" -name llvm-addr2line -print -quit)
+          test -n "$addr2line"
+          "$addr2line" -C -f -e "$so" \
+            0x2e485c 0x2e4274 0x2e3858 0x2e36ec
+
       - name: Verify APK
         run: |
           apk=$(find android/app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
