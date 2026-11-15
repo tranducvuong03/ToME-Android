@@ -1126,6 +1126,7 @@ void do_resize(int w, int h, bool fullscreen, bool borderless, float zoom)
 		maincontext = SDL_GL_CreateContext(window);
 		SDL_GL_MakeCurrent(window, maincontext);
 #ifdef __ANDROID__
+		set_getprocaddress(SDL_GL_GetProcAddress);
 		initialize_gl4es();
 		glewExperimental = GL_TRUE;
 #endif
