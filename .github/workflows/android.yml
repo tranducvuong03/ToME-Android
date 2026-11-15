@@ -49,6 +49,16 @@ jobs:
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
+      - name: Symbolize Android resize crash
+        run: |
+          so=$(find android/app -type f -name libmain.so \
+            -not -path '*/merged_native_libs/*' -print -quit)
+          addr2line=$(find "$ANDROID_HOME/ndk" -name llvm-addr2line -print -quit)
+          readelf=$(find "$ANDROID_HOME/ndk" -name llvm-readelf -print -quit)
+          "$readelf" -n "$so" | grep 'Build ID'
+          "$addr2line" -C -f -e "$so" \
+            0x734d70 0x6103ec 0x2b2798
+
       - name: Verify APK
         run: |
           apk=$(find android/app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
