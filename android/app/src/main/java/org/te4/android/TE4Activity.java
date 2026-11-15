@@ -20,12 +20,14 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.text.InputType;
 import android.view.MotionEvent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
@@ -57,8 +59,14 @@ public final class TE4Activity extends SDLActivity {
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
+    private JoystickView joystick;
+    private View barToggle;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
     private boolean textInputEnabled = true;
+    private boolean tapMaySendEnter;
+    private float tapDownX;
+    private float tapDownY;
+    private long tapDownTime;
     private TextView installStatus;
 
     @Override
@@ -184,15 +192,15 @@ public final class TE4Activity extends SDLActivity {
         barLayout.bottomMargin = dp(5);
         addContentView(shortcutBar, barLayout);
 
-        JoystickView joystick = new JoystickView(this);
+        joystick = new JoystickView(this);
         FrameLayout.LayoutParams joystickLayout = new FrameLayout.LayoutParams(
                 dp(136), dp(136), Gravity.BOTTOM | Gravity.START);
         joystickLayout.leftMargin = dp(5);
         joystickLayout.bottomMargin = dp(3);
         addContentView(joystick, joystickLayout);
 
-        TextView toggle = makeControl("BAR");
-        toggle.setOnClickListener(new View.OnClickListener() {
+        barToggle = makeControl("BAR");
+        barToggle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 shortcutBar.setVisibility(shortcutBar.getVisibility() == View.VISIBLE
@@ -201,7 +209,53 @@ public final class TE4Activity extends SDLActivity {
         });
         FrameLayout.LayoutParams toggleLayout = new FrameLayout.LayoutParams(
                 dp(56), height, Gravity.TOP | Gravity.START);
-        addContentView(toggle, toggleLayout);
+        addContentView(barToggle, toggleLayout);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                tapDownX = event.getRawX();
+                tapDownY = event.getRawY();
+                tapDownTime = SystemClock.uptimeMillis();
+                tapMaySendEnter = !isTouchControlAt(tapDownX, tapDownY);
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (Math.hypot(event.getRawX() - tapDownX, event.getRawY() - tapDownY)
+                        > ViewConfiguration.get(this).getScaledTouchSlop()) {
+                    tapMaySendEnter = false;
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+            case MotionEvent.ACTION_CANCEL:
+                tapMaySendEnter = false;
+                break;
+            case MotionEvent.ACTION_UP:
+                boolean sendEnter = tapMaySendEnter
+                        && SystemClock.uptimeMillis() - tapDownTime < 500
+                        && !isTouchControlAt(event.getRawX(), event.getRawY());
+                tapMaySendEnter = false;
+                boolean handled = super.dispatchTouchEvent(event);
+                if (sendEnter) nativeSendKey(13);
+                return handled;
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    private boolean isTouchControlAt(float screenX, float screenY) {
+        return isInsideView(shortcutBar, screenX, screenY)
+                || isInsideView(joystick, screenX, screenY)
+                || isInsideView(barToggle, screenX, screenY)
+                || isInsideView(installStatus, screenX, screenY);
+    }
+
+    private boolean isInsideView(View view, float screenX, float screenY) {
+        if (view == null || view.getVisibility() != View.VISIBLE) return false;
+        int[] location = new int[2];
+        view.getLocationOnScreen(location);
+        return screenX >= location[0] && screenX < location[0] + view.getWidth()
+                && screenY >= location[1] && screenY < location[1] + view.getHeight();
     }
 
     private void addControl(LinearLayout row, String label, final int keycode, boolean keyboard) {
