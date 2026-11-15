@@ -230,38 +230,6 @@ SDL_ListModes(const SDL_PixelFormat * format, Uint32 flags)
 
 
 /***** Helpers *****/
-static GLenum sdl_gl_texture_format(SDL_Surface *s) {
-	// get the number of channels in the SDL surface
-	GLint nOfColors = s->format->BytesPerPixel;
-	GLenum texture_format;
-	if (nOfColors == 4)	 // contains an alpha channel
-	{
-#if SDL_BYTEORDER == SDL_BIG_ENDIAN
-		if (s->format->Rmask == 0xff000000)
-#else
-		if (s->format->Rmask == 0x000000ff)
-#endif
-			texture_format = GL_RGBA;
-		else
-			texture_format = GL_BGRA;
-	} else if (nOfColors == 3)	 // no alpha channel
-	{
-#if SDL_BYTEORDER == SDL_BIG_ENDIAN
-		if (s->format->Rmask == 0x00ff0000)
-#else
-		if (s->format->Rmask == 0x000000ff)
-#endif
-			texture_format = GL_RGB;
-		else
-			texture_format = GL_BGR;
-	} else {
-		printf("warning: the image is not truecolor..  this will probably break %d\n", nOfColors);
-		// this error should not go unhandled
-	}
-
-	return texture_format;
-}
-
 
 // allocate memory for a texture without copying pixels in
 // caller binds texture
@@ -272,10 +240,6 @@ void make_texture_for_surface(SDL_Surface *s, int *fw, int *fh, bool clamp) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-	// get the number of channels in the SDL surface
-	GLint nOfColors = s->format->BytesPerPixel;
-	GLenum texture_format = sdl_gl_texture_format(s);
 
 	// In case we can't support NPOT textures round up to nearest POT
 	int realw=1;
@@ -294,7 +258,7 @@ void make_texture_for_surface(SDL_Surface *s, int *fw, int *fh, bool clamp) {
 		largest_size = realh*realw*4;
 		printf("Upgrading black texture to size %d\n", largest_size);
 	}
-	glTexImage2D(GL_TEXTURE_2D, 0, nOfColors, realw, realh, 0, texture_format, GL_UNSIGNED_BYTE, largest_black);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, realw, realh, 0, GL_RGBA, GL_UNSIGNED_BYTE, largest_black);
 
 #ifdef _DEBUG
 	GLenum err = glGetError();
@@ -306,9 +270,43 @@ void make_texture_for_surface(SDL_Surface *s, int *fw, int *fh, bool clamp) {
 
 // copy pixels into previous allocated surface
 void copy_surface_to_texture(SDL_Surface *s) {
-	GLenum texture_format = sdl_gl_texture_format(s);
+	SDL_Surface *rgba = s;
+	if (s->format->format != SDL_PIXELFORMAT_RGBA32) {
+		rgba = SDL_ConvertSurfaceFormat(s, SDL_PIXELFORMAT_RGBA32, 0);
+		if (!rgba) {
+			printf("copy_surface_to_texture: failed to convert surface to RGBA: %s\n", SDL_GetError());
+			return;
+		}
+	}
 
-	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s->w, s->h, texture_format, GL_UNSIGNED_BYTE, s->pixels);
+	if (SDL_MUSTLOCK(rgba) && SDL_LockSurface(rgba) < 0) {
+		printf("copy_surface_to_texture: failed to lock RGBA surface: %s\n", SDL_GetError());
+		if (rgba != s) SDL_FreeSurface(rgba);
+		return;
+	}
+
+	Uint8 *packed_pixels = NULL;
+	const void *pixels = rgba->pixels;
+	if (rgba->pitch != rgba->w * 4) {
+		packed_pixels = malloc((size_t)rgba->w * rgba->h * 4);
+		if (!packed_pixels) {
+			printf("copy_surface_to_texture: failed to allocate packed RGBA pixels\n");
+			if (SDL_MUSTLOCK(rgba)) SDL_UnlockSurface(rgba);
+			if (rgba != s) SDL_FreeSurface(rgba);
+			return;
+		}
+
+		int y;
+		for (y = 0; y < rgba->h; y++)
+			memcpy(packed_pixels + (size_t)y * rgba->w * 4, (Uint8 *)rgba->pixels + (size_t)y * rgba->pitch, (size_t)rgba->w * 4);
+		pixels = packed_pixels;
+	}
+
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, rgba->w, rgba->h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+	free(packed_pixels);
+	if (SDL_MUSTLOCK(rgba)) SDL_UnlockSurface(rgba);
+	if (rgba != s) SDL_FreeSurface(rgba);
 
 #ifdef _DEBUG
 	GLenum err = glGetError();
