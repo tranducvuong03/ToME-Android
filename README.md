@@ -18,7 +18,7 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 
 | Control | Effect |
 |---|---|
-| Eight-way pad | Move in the selected direction; diagonal directions use the numpad movement keys. Hold to repeat. |
+| 8-direction pad | Move in the selected direction; diagonal directions use the numpad movement keys. Hold to repeat. |
 | `↵` at the center of the pad | Send Enter; confirm in menus and change levels while standing on stairs. |
 | Hold the pad's center for half a second, then drag | Reposition the pad. Release to save its position for future launches. |
 | `PAD` | Show or hide the eight-way pad; the visibility choice is saved. |
