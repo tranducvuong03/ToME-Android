@@ -15,6 +15,14 @@ On Android 10 and newer, native output is written to
 `Download/Tales of Maj'Eyal/te4_log.txt`. The log is replaced on each launch.
 Game data remains in the app's private storage.
 
+## Android controls
+
+The game runs in landscape. The translucent bottom bar keeps the keyboard
+toggle, Escape, Tab, and arrow keys; use the lower-left joystick for eight-way
+movement. Tap `+` to type and save a one-character shortcut with the phone's
+keyboard. Saved shortcuts persist between launches; long-press one to delete
+it. The built-in controls cannot be deleted.
+
 ## Licensing
 
 The engine and port code use GPL-3.0-only; see [LICENSE](LICENSE). Game content
