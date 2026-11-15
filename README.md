@@ -25,11 +25,13 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | `↵` at the center of the pad | Send Enter (confirm in menus and use the game's Enter action). |
 | Hold the pad's center for half a second, then drag | Reposition the pad. Release to save its position for future launches. |
 | `⌨` | Show or hide the on-screen keyboard. |
-| `LMB` / `RMB` | Send a left or right mouse click at the most recently touched game position. |
-| `ESC`, `TAB`, arrow buttons | Send the corresponding game key. |
+| `ESC`, `TAB`, arrow buttons, `<`, `>` | Send the corresponding game key; `<` and `>` change levels when standing on stairs. |
 | `BAR` | Show or hide the shortcut bar; hold and drag it to reposition it. |
 | Hold a built-in key on the shortcut bar, then drag | Reposition the shortcut bar. Release to save its position for future launches. |
 | `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches; long-press one to delete it. Built-in controls cannot be deleted. |
+| `MOUSE` | Show or hide the separate mouse controls. |
+| Mouse cursor pad | Hold a direction to move the game pointer; the `LMB` and `RMB` buttons click at that pointer position. |
+| `MOVE` on the mouse controls | Hold and drag to reposition the mouse controls; release to save their position. |
 
 Tapping the game area does not send Enter; use the center of the direction pad
 instead.
