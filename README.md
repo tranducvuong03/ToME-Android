@@ -21,20 +21,23 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | Eight-way pad | Move in the selected direction; diagonal directions use the numpad movement keys. Hold to repeat. |
 | `↵` at the center of the pad | Send Enter; confirm in menus and change levels while standing on stairs. |
 | Hold the pad's center for half a second, then drag | Reposition the pad. Release to save its position for future launches. |
+| `PAD` | Show or hide the eight-way pad; the visibility choice is saved. |
 | `⌨` | Show or hide the on-screen keyboard. |
 | `ESC`, `TAB`, arrow buttons | Send the corresponding game key. |
 | `BAR` | Show or hide the shortcut bar; hold and drag it to reposition it. |
-| `DLC` | Open the DLC folder/import options; shown only in the main menu. |
+| `ADDONS` | Open the add-ons folder/import options; shown only in the main menu. |
 | Hold a built-in key on the shortcut bar, then drag | Reposition the shortcut bar. Release to save its position for future launches. |
-| `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches; long-press one to delete it. Built-in controls cannot be deleted. |
+| `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches. |
+| Hold a custom shortcut | Show its action from the game's Key bindings; use **Delete shortcut** in the dialog to remove it. Built-in controls cannot be deleted. |
 
-## DLC on Android
+## Add-ons on Android
 
-Put downloaded DLC archives (`.teaac`) in
-`Download/Tales of Maj'Eyal/DLC`. Tap **DLC** in the game and choose this folder
-once when prompted; create the folder first if it does not exist. The app copies
-new archives into its private `game/addons` folder at launch. **Import now**
-copies them immediately, but the game must be restarted before they are loaded.
+Put DLC archives (`.teaac`) and add-on archives (`.teaa`) in
+`Download/Tales of Maj'Eyal/addons`. The app creates this folder automatically
+when you first open the add-ons menu. Tap **ADDONS** → **Import Add-ons** to
+copy the archives into the game's private `game/addons` folder. Grant storage
+permission when prompted the first time. Restart the game after importing to
+load them.
 
 ## Licensing
 
