@@ -67,20 +67,21 @@ public final class TE4Activity extends SDLActivity {
     private static final String DLC_PREFERENCES = "te4_dlc";
     private static final String DLC_FOLDER_URI = "folder_uri";
     private static final String DLC_FOLDER_PATH = "Download/Tales of Maj'Eyal/DLC";
-    private static final String ENGINE_ARCHIVE_UPDATE_MARKER =
-            ".te4-engine-archive-update-v3";
+    private static final String GAME_ARCHIVE_UPDATE_MARKER =
+            ".te4-game-archives-update-v4";
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
     private DirectionPadView directionPad;
     private View barToggle;
+    private View dlcButton;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
     private TextView installStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         ParcelFileDescriptor logFile = null;
-        boolean engineArchiveUpdateFailed = false;
+        boolean gameArchiveUpdateFailed = false;
         boolean dlcImportFailed = false;
         int importedDlcCount = 0;
         try {
@@ -103,15 +104,15 @@ public final class TE4Activity extends SDLActivity {
                     installGameData();
                 }
             }, "TE4 game data installer").start();
-        } else if (!new File(getFilesDir(), ENGINE_ARCHIVE_UPDATE_MARKER).isFile()) {
+        } else if (!new File(getFilesDir(), GAME_ARCHIVE_UPDATE_MARKER).isFile()) {
             try {
-                updateEngineArchive();
+                updateGameArchives();
             } catch (IOException e) {
-                Log.e("TE4", "Could not update the game engine archive", e);
-                engineArchiveUpdateFailed = true;
+                Log.e("TE4", "Could not update the game archives", e);
+                gameArchiveUpdateFailed = true;
             } catch (SecurityException e) {
-                Log.e("TE4", "Could not update the game engine archive", e);
-                engineArchiveUpdateFailed = true;
+                Log.e("TE4", "Could not update the game archives", e);
+                gameArchiveUpdateFailed = true;
             }
         }
         if (gameDataMarker.isFile()) {
@@ -143,8 +144,8 @@ public final class TE4Activity extends SDLActivity {
             }
         }
         createTouchControls();
-        if (engineArchiveUpdateFailed) {
-            Toast.makeText(this, "Could not update game engine", Toast.LENGTH_LONG).show();
+        if (gameArchiveUpdateFailed) {
+            Toast.makeText(this, "Could not update game files", Toast.LENGTH_LONG).show();
         }
         if (dlcImportFailed) {
             Toast.makeText(this, "Could not read the DLC folder; select it again",
@@ -221,7 +222,7 @@ public final class TE4Activity extends SDLActivity {
     private void showDlcManager() {
         Uri configuredFolder = getSavedDlcFolder();
         boolean hasFolder = configuredFolder != null;
-        String message = "Download DLC archives (.teaa) and put them in:\n\n"
+        String message = "Download DLC archives (.teaac) and put them in:\n\n"
                 + DLC_FOLDER_PATH
                 + "\n\nChoose this folder once. New packages are imported automatically "
                 + "when the game starts. You can also import now; restart the game afterward "
@@ -262,6 +263,17 @@ public final class TE4Activity extends SDLActivity {
                 })
                 .setNegativeButton("Close", null)
                 .show();
+    }
+
+    public void setDlcButtonVisible(final boolean visible) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (dlcButton != null) {
+                    dlcButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+                }
+            }
+        });
     }
 
     private String getDlcFolderDisplayPath(Uri treeUri) {
@@ -335,16 +347,15 @@ public final class TE4Activity extends SDLActivity {
                 String mimeType = cursor.getString(typeColumn);
                 if (name == null || DocumentsContract.Document.MIME_TYPE_DIR.equals(mimeType)
                         || name.contains("/") || name.contains("\\")
-                        || !name.toLowerCase(Locale.ROOT).endsWith(".teaa")) {
+                        || !name.toLowerCase(Locale.ROOT).endsWith(".teaac")) {
                     continue;
                 }
-                String addonName = name.substring(0, name.length() - 5) + ".teaa";
 
                 long sourceSize = sizeColumn >= 0 && !cursor.isNull(sizeColumn)
                         ? cursor.getLong(sizeColumn) : -1;
                 long sourceModified = modifiedColumn >= 0 && !cursor.isNull(modifiedColumn)
                         ? cursor.getLong(modifiedColumn) : 0;
-                File destination = new File(addonsDirectory, addonName);
+                File destination = new File(addonsDirectory, name);
                 if (destination.isFile()
                         && (sourceSize < 0 || destination.length() == sourceSize)
                         && (sourceModified <= 0
@@ -352,7 +363,7 @@ public final class TE4Activity extends SDLActivity {
                     continue;
                 }
 
-                File temporary = new File(addonsDirectory, addonName + ".import.tmp");
+                File temporary = new File(addonsDirectory, name + ".import.tmp");
                 if (temporary.exists() && !temporary.delete()) {
                     throw new IOException("Could not remove an incomplete DLC import");
                 }
@@ -360,9 +371,7 @@ public final class TE4Activity extends SDLActivity {
                         treeUri, cursor.getString(idColumn));
                 try {
                     InputStream input = resolver.openInputStream(documentUri);
-                    if (input == null) {
-                        throw new IOException("Could not open DLC archive: " + addonName);
-                    }
+                    if (input == null) throw new IOException("Could not open DLC archive: " + name);
                     try (InputStream source = input;
                             FileOutputStream output = new FileOutputStream(temporary)) {
                         byte[] buffer = new byte[32 * 1024];
@@ -372,18 +381,18 @@ public final class TE4Activity extends SDLActivity {
                         }
                     }
                     if (sourceSize >= 0 && temporary.length() != sourceSize) {
-                        throw new IOException("DLC archive size mismatch: " + addonName);
+                        throw new IOException("DLC archive size mismatch: " + name);
                     }
                     try {
                         Os.rename(temporary.getAbsolutePath(), destination.getAbsolutePath());
                     } catch (ErrnoException e) {
-                        throw new IOException("Could not install DLC archive: " + addonName, e);
+                        throw new IOException("Could not install DLC archive: " + name, e);
                     }
                     if (sourceModified > 0) destination.setLastModified(sourceModified);
                     imported++;
                 } finally {
                     if (temporary.exists() && !temporary.delete()) {
-                        Log.e("TE4", "Could not remove temporary DLC archive " + addonName);
+                        Log.e("TE4", "Could not remove temporary DLC archive " + name);
                     }
                 }
             }
@@ -393,7 +402,7 @@ public final class TE4Activity extends SDLActivity {
 
     private void showDlcImportResult(int imported, boolean needsRestart) {
         if (imported == 0) {
-            Toast.makeText(this, "No new .teaa DLC archives found",
+            Toast.makeText(this, "No new .teaac DLC archives found",
                     Toast.LENGTH_LONG).show();
         } else {
             String message = "Imported " + imported + " DLC package(s)";
@@ -402,32 +411,39 @@ public final class TE4Activity extends SDLActivity {
         }
     }
 
-    private void updateEngineArchive() throws IOException {
-        File engineArchive = new File(getFilesDir(), "game/engines/te4-1.7.6.teae");
-        File temporaryArchive = new File(engineArchive.getParentFile(),
+    private void updateGameArchives() throws IOException {
+        replaceBundledArchive("game/engines/te4-1.7.6.teae",
+                new File(getFilesDir(), "game/engines/te4-1.7.6.teae"),
                 "te4-1.7.6.teae.tmp");
-        File marker = new File(getFilesDir(), ENGINE_ARCHIVE_UPDATE_MARKER);
+        replaceBundledArchive("game/modules/boot-te4-1.7.6.team",
+                new File(getFilesDir(), "game/modules/boot-te4-1.7.6.team"),
+                "boot-te4-1.7.6.team.tmp");
+        File marker = new File(getFilesDir(), GAME_ARCHIVE_UPDATE_MARKER);
+        if (!marker.createNewFile() && !marker.isFile()) {
+            throw new IOException("Could not record the game archive update");
+        }
+    }
 
+    private void replaceBundledArchive(String assetPath, File archive, String temporaryName)
+            throws IOException {
+        File temporaryArchive = new File(archive.getParentFile(), temporaryName);
         try {
             if (temporaryArchive.exists() && !temporaryArchive.delete()) {
-                throw new IOException("Could not clear an incomplete engine archive update");
+                throw new IOException("Could not clear an incomplete archive update");
             }
-            copyAssetTree(getAssets(), "game/engines/te4-1.7.6.teae", temporaryArchive);
+            copyAssetTree(getAssets(), assetPath, temporaryArchive);
             if (!temporaryArchive.isFile() || temporaryArchive.length() == 0) {
-                throw new IOException("Updated engine archive is empty");
+                throw new IOException("Updated archive is empty: " + assetPath);
             }
             try {
-                Os.rename(temporaryArchive.getAbsolutePath(), engineArchive.getAbsolutePath());
+                Os.rename(temporaryArchive.getAbsolutePath(), archive.getAbsolutePath());
             } catch (ErrnoException e) {
-                throw new IOException("Could not replace the engine archive", e);
+                throw new IOException("Could not replace archive: " + assetPath, e);
             }
         } finally {
             if (temporaryArchive.exists() && !temporaryArchive.delete()) {
-                Log.e("TE4", "Could not remove temporary engine archive");
+                Log.e("TE4", "Could not remove temporary archive " + temporaryName);
             }
-        }
-        if (!marker.createNewFile() && !marker.isFile()) {
-            throw new IOException("Could not record the engine archive update");
         }
     }
 
@@ -532,7 +548,7 @@ public final class TE4Activity extends SDLActivity {
         addContentView(barToggle, toggleLayout);
         restoreOverlayWhenLaidOut(barToggle, "bar_toggle", false);
 
-        TextView dlcButton = makeControl("DLC");
+        dlcButton = makeControl("DLC");
         dlcButton.setContentDescription("Show the DLC folder and import downloaded DLC");
         dlcButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -545,6 +561,7 @@ public final class TE4Activity extends SDLActivity {
         dlcButtonLayout.rightMargin = dp(6);
         dlcButtonLayout.topMargin = dp(6);
         addContentView(dlcButton, dlcButtonLayout);
+        dlcButton.setVisibility(View.VISIBLE);
 
     }
 
@@ -1148,9 +1165,9 @@ public final class TE4Activity extends SDLActivity {
         try {
             copyAssetTree(getAssets(), "bootstrap", new File(getFilesDir(), "bootstrap"));
             copyAssetTree(getAssets(), "game", new File(getFilesDir(), "game"));
-            File engineArchiveMarker = new File(getFilesDir(), ENGINE_ARCHIVE_UPDATE_MARKER);
-            if (!engineArchiveMarker.isFile() && !engineArchiveMarker.createNewFile()) {
-                throw new IOException("Could not record the engine archive version");
+            File gameArchiveMarker = new File(getFilesDir(), GAME_ARCHIVE_UPDATE_MARKER);
+            if (!gameArchiveMarker.isFile() && !gameArchiveMarker.createNewFile()) {
+                throw new IOException("Could not record the game archive version");
             }
             if (!marker.createNewFile()) {
                 throw new IOException("Could not create game data marker");
