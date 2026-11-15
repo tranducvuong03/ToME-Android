@@ -49,20 +49,6 @@ jobs:
         working-directory: android
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Symbolize reported native crash
-        run: |
-          find android/app -type f -name libmain.so -print
-          so=$(find android/app -type f -name libmain.so \
-            -not -path '*/merged_native_libs/*' -print -quit)
-          test -n "$so"
-          addr2line=$(find "$ANDROID_HOME/ndk" -name llvm-addr2line -print -quit)
-          test -n "$addr2line"
-          printf 'Symbolizing %s\n' "$so"
-          readelf=$(find "$ANDROID_HOME/ndk" -name llvm-readelf -print -quit)
-          "$readelf" -n "$so" | grep 'Build ID'
-          "$addr2line" -C -f -e "$so" \
-            0x2e485c 0x2e4274 0x2e3858 0x2e36ec
-
       - name: Verify APK
         run: |
           apk=$(find android/app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
