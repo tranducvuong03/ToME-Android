@@ -49,12 +49,12 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches. |
 | Hold a custom shortcut | Show its action from the game's Key bindings; use **Delete shortcut** in the dialog to remove it. |
 
-## Add-ons on Android
+## Add-ons
 
 1. **Setup:** Select `Download/Tales of Maj'Eyal` (or any folder) on first launch, or later via the **ADDONS** menu. The app will create an `addons` subfolder inside.
 2. **Install:** Put `.teaa` or `.teaac` files into `Download/Tales of Maj'Eyal/addons`, open game → tap **ADDONS** → **Import Add-ons**, and restart the game.
 
-## Game Saves on Android
+## Game Saves
 
 1. **Auto-Sync:** Saves automatically back up to the `save` subfolder when returning to the main menu, and restore when the game starts.
 2. **Manual:** Copy old character files into `save` to restore them. Use **SAVE** → **Import Saves** (to load immediately) or **Back Up Now** (to force a backup).
