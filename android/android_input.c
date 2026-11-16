@@ -6,6 +6,11 @@
 
 static int startup_ui_ready_pending;
 
+void TE4AndroidSetStartupUiReady(void)
+{
+	startup_ui_ready_pending = 1;
+}
+
 static void pushKeyEvent(Uint32 type, SDL_Keycode keycode)
 {
 	SDL_Event event;
@@ -48,8 +53,6 @@ Java_org_te4_android_TE4Activity_nativeSetTextInput(JNIEnv *env, jclass type, jb
 
 void TE4AndroidSetDlcButtonVisible(int visible)
 {
-	if (visible) startup_ui_ready_pending = 1;
-
 	JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
 	jobject activity = SDL_AndroidGetActivity();
 	jclass activityClass;

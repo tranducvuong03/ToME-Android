@@ -90,7 +90,7 @@ public final class TE4Activity extends SDLActivity {
     private static final String SAVE_SYNC_READY_MARKER = ".te4-save-sync-ready";
     private static final String SAVE_SYNC_ERROR_MARKER = ".te4-save-sync-error";
     private static final String GAME_ARCHIVE_UPDATE_MARKER =
-            ".te4-game-archives-update-v6";
+            ".te4-game-archives-update-v7";
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;

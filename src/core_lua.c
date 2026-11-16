@@ -481,6 +481,7 @@ static const struct luaL_Reg keylib[] =
 extern int current_game;
 #ifdef __ANDROID__
 extern void TE4AndroidSetDlcButtonVisible(int visible);
+extern void TE4AndroidSetStartupUiReady(void);
 #endif
 static int lua_set_current_game(lua_State *L)
 {
@@ -498,6 +499,15 @@ static int lua_set_dlc_button_visible(lua_State *L)
 {
 #ifdef __ANDROID__
 	TE4AndroidSetDlcButtonVisible(lua_toboolean(L, 1));
+#else
+	(void)L;
+#endif
+	return 0;
+}
+static int lua_set_startup_ui_ready(lua_State *L)
+{
+#ifdef __ANDROID__
+	TE4AndroidSetStartupUiReady();
 #else
 	(void)L;
 #endif
@@ -663,6 +673,7 @@ static const struct luaL_Reg gamelib[] =
 	{"reboot", lua_reboot_lua},
 	{"set_current_game", lua_set_current_game},
 	{"setDlcButtonVisible", lua_set_dlc_button_visible},
+	{"setStartupUiReady", lua_set_startup_ui_ready},
 	{"exit_engine", lua_exit_engine},
 	{"getTime", lua_get_time},
 	{"getFrameTime", lua_get_frame_time},
