@@ -4,6 +4,8 @@
 #include <SDL.h>
 #include <SDL_system.h>
 
+static int startup_ui_ready_pending;
+
 static void pushKeyEvent(Uint32 type, SDL_Keycode keycode)
 {
 	SDL_Event event;
@@ -46,6 +48,8 @@ Java_org_te4_android_TE4Activity_nativeSetTextInput(JNIEnv *env, jclass type, jb
 
 void TE4AndroidSetDlcButtonVisible(int visible)
 {
+	if (visible) startup_ui_ready_pending = 1;
+
 	JNIEnv *env = (JNIEnv *)SDL_AndroidGetJNIEnv();
 	jobject activity = SDL_AndroidGetActivity();
 	jclass activityClass;
@@ -77,6 +81,50 @@ void TE4AndroidSetDlcButtonVisible(int visible)
 			visible ? JNI_TRUE : JNI_FALSE);
 	if ((*env)->ExceptionCheck(env)) {
 		fprintf(stderr, "Could not update Android DLC button visibility\n");
+		(*env)->ExceptionDescribe(env);
+		(*env)->ExceptionClear(env);
+	}
+
+	(*env)->DeleteLocalRef(env, activityClass);
+	(*env)->DeleteLocalRef(env, activity);
+}
+
+void TE4AndroidNotifyRenderedFrame(void)
+{
+	JNIEnv *env;
+	jobject activity;
+	jclass activityClass;
+	jmethodID onStartupUiReady;
+
+	if (!startup_ui_ready_pending) return;
+	startup_ui_ready_pending = 0;
+
+	env = (JNIEnv *)SDL_AndroidGetJNIEnv();
+	activity = SDL_AndroidGetActivity();
+	if (!env || !activity) {
+		fprintf(stderr, "Could not access the Android activity after rendering the startup menu\n");
+		return;
+	}
+
+	activityClass = (*env)->GetObjectClass(env, activity);
+	if (!activityClass) {
+		fprintf(stderr, "Could not resolve the Android activity class after startup\n");
+		(*env)->DeleteLocalRef(env, activity);
+		return;
+	}
+
+	onStartupUiReady = (*env)->GetMethodID(env, activityClass, "onStartupUiReady", "()V");
+	if (!onStartupUiReady) {
+		fprintf(stderr, "Could not resolve onStartupUiReady on the Android activity\n");
+		if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+		(*env)->DeleteLocalRef(env, activityClass);
+		(*env)->DeleteLocalRef(env, activity);
+		return;
+	}
+
+	(*env)->CallVoidMethod(env, activity, onStartupUiReady);
+	if ((*env)->ExceptionCheck(env)) {
+		fprintf(stderr, "Could not dismiss the Android startup loading screen\n");
 		(*env)->ExceptionDescribe(env);
 		(*env)->ExceptionClear(env);
 	}

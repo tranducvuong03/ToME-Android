@@ -39,6 +39,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -89,7 +90,7 @@ public final class TE4Activity extends SDLActivity {
     private static final String SAVE_SYNC_READY_MARKER = ".te4-save-sync-ready";
     private static final String SAVE_SYNC_ERROR_MARKER = ".te4-save-sync-error";
     private static final String GAME_ARCHIVE_UPDATE_MARKER =
-            ".te4-game-archives-update-v5";
+            ".te4-game-archives-update-v6";
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
@@ -98,11 +99,14 @@ public final class TE4Activity extends SDLActivity {
     private View padToggle;
     private View addonsButton;
     private View saveButton;
+    private FrameLayout startupLoadingOverlay;
+    private ProgressBar startupLoadingProgress;
     private final ArrayList<Shortcut> customShortcuts = new ArrayList<>();
     private Map<String, ShortcutActionBinding> shortcutActionBindings;
-    private TextView installStatus;
+    private TextView startupLoadingStatus;
     private AlertDialog saveImportProgress;
     private boolean saveSyncInProgress;
+    private boolean startupUiReady;
     private boolean gameDataReady;
     private boolean nativeResumePending;
     private int pendingStorageAction;
@@ -118,6 +122,7 @@ public final class TE4Activity extends SDLActivity {
     protected void onCreate(Bundle savedInstanceState) {
         if (savedInstanceState != null) {
             pendingStorageAction = savedInstanceState.getInt("pending_storage_action");
+            startupUiReady = savedInstanceState.getBoolean("startup_ui_ready", false);
         }
         File saveSyncReadyMarker = new File(getFilesDir(), SAVE_SYNC_READY_MARKER);
         if (saveSyncReadyMarker.exists() && !saveSyncReadyMarker.delete()) {
@@ -180,20 +185,61 @@ public final class TE4Activity extends SDLActivity {
             }
         }
         createTouchControls();
+        showStartupLoadingOverlay(gameDataReady ? "Loading game…" : "Preparing game data…");
         prepareInitialSaveSync();
         if (gameArchiveUpdateFailed) {
             Toast.makeText(this, "Could not update game files", Toast.LENGTH_LONG).show();
         }
-        if (!gameDataMarker.isFile()) {
-            installStatus = makeControl("Preparing game data…");
-            FrameLayout.LayoutParams statusLayout = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(52), Gravity.CENTER);
-            addContentView(installStatus, statusLayout);
-        }
+    }
+
+    private void showStartupLoadingOverlay(String message) {
+        startupLoadingOverlay = new FrameLayout(this);
+        startupLoadingOverlay.setBackgroundColor(Color.BLACK);
+        startupLoadingOverlay.setClickable(true);
+        startupLoadingOverlay.setFocusable(true);
+        startupLoadingOverlay.setFocusableInTouchMode(true);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER);
+
+        startupLoadingProgress = new ProgressBar(this);
+        content.addView(startupLoadingProgress,
+                new LinearLayout.LayoutParams(dp(40), dp(40)));
+
+        startupLoadingStatus = new TextView(this);
+        startupLoadingStatus.setText(message);
+        startupLoadingStatus.setTextColor(Color.WHITE);
+        startupLoadingStatus.setTextSize(18);
+        startupLoadingStatus.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams statusLayout = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statusLayout.topMargin = dp(18);
+        content.addView(startupLoadingStatus, statusLayout);
+
+        startupLoadingOverlay.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER));
+        startupLoadingOverlay.setVisibility(startupUiReady ? View.GONE : View.VISIBLE);
+        addContentView(startupLoadingOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    public void onStartupUiReady() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                startupUiReady = true;
+                if (startupLoadingOverlay != null) {
+                    startupLoadingOverlay.setVisibility(View.GONE);
+                }
+            }
+        });
     }
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
+        outState.putBoolean("startup_ui_ready", startupUiReady);
         outState.putInt("pending_storage_action", pendingStorageAction);
         super.onSaveInstanceState(outState);
     }
@@ -2201,8 +2247,11 @@ public final class TE4Activity extends SDLActivity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    if (installStatus != null) {
-                        installStatus.setText("Could not install game data");
+                    if (startupLoadingProgress != null) {
+                        startupLoadingProgress.setVisibility(View.GONE);
+                    }
+                    if (startupLoadingStatus != null) {
+                        startupLoadingStatus.setText("Could not install game data");
                     }
                 }
             });
@@ -2212,7 +2261,9 @@ public final class TE4Activity extends SDLActivity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (installStatus != null) installStatus.setVisibility(View.GONE);
+                if (startupLoadingStatus != null) {
+                    startupLoadingStatus.setText("Loading game…");
+                }
                 markGameDataReady();
             }
         });
