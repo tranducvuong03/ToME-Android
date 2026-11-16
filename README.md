@@ -2,6 +2,20 @@
 
 Unofficial Android build and touch-control port for Tales of Maj'Eyal (T-Engine 4).
 
+<table>
+  <tr>
+    <td width="33.33%">
+      <img src="https://github.com/user-attachments/assets/899df79c-0641-4709-8251-75a1c4865cbf" alt="Screenshot 1" />
+    </td>
+    <td width="33.33%">
+      <img src="https://github.com/user-attachments/assets/04601cb6-f765-4ad6-807e-819ded627e55" alt="Screenshot 2" />
+    </td>
+    <td width="33.33%">
+      <img src="https://github.com/user-attachments/assets/4f731213-f625-4d9c-a811-0cfc2ecb48b5" alt="Screenshot 3" />
+    </td>
+  </tr>
+</table>
+
 ## Android build
 
 The GitHub Actions workflow in `.github/workflows/android.yml` builds an arm64
@@ -18,7 +32,7 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 
 | Control | Effect |
 |---|---|
-| Eight-way pad | Move in the selected direction; diagonal directions use the numpad movement keys. Hold to repeat. |
+| 8-direction pad | Move in the selected direction; diagonal directions use the numpad movement keys. Hold to repeat. |
 | `↵` at the center of the pad | Send Enter; confirm in menus and change levels while standing on stairs. |
 | Hold the pad's center for half a second, then drag | Reposition the pad. Release to save its position for future launches. |
 | `PAD` | Show or hide the eight-way pad; the visibility choice is saved. |
