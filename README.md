@@ -25,7 +25,7 @@ Upstream: https://te4.org/download
 
 Download the latest build here: <a href="https://github.com/tranducvuong03/tome-android-port/releases/tag/1.7.6">Release</a>
 
-## Android controls
+## Controls
 
 The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal:
 
