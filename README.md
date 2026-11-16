@@ -51,12 +51,12 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 
 On startup, a loading screen blocks input until the main menu has been initialized and its first frame rendered.
 
-## Add-ons on Android
+## Add-ons
 
 1. **Setup:** Select `Download/Tales of Maj'Eyal` (or any folder) on first launch, or later via the **ADDONS** menu. The app will create an `addons` subfolder inside.
-2. **Install:** Put `.teaa` or `.teaac` files into `Download/Tales of Maj'Eyal/addons`, open game → tap **ADDONS** → **Import Add-ons**, and restart the game.
+2. **Install:** Put `.teaa` or `.teaac` files into `Download/Tales of Maj'Eyal/addons` (or folder you choose with `addons` inside), open game → tap **ADDONS** → **Import Add-ons**, and restart the game.
 
-## Game Saves on Android
+## Game Saves
 
 1. **Auto-Sync:** Saves automatically back up to the `save` subfolder when returning to the main menu, and restore when the game starts.
 2. **Manual:** Copy old character files into `save` to restore them. Use **SAVE** → **Import Saves** (to load immediately) or **Back Up Now** (to force a backup).
