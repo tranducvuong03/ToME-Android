@@ -2,6 +2,8 @@
 
 Unofficial Android build and touch-control port for Tales of Maj'Eyal (T-Engine 4).
 
+Upstream: https://te4.org/download
+
 <table>
   <tr>
     <td width="33.33%">
@@ -37,7 +39,7 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | Hold the pad's center for half a second, then drag | Reposition the pad. Release to save its position for future launches. |
 | `PAD` | Show or hide the eight-way pad; the visibility choice is saved. |
 | `⌨` | Show or hide the on-screen keyboard. |
-| `ESC`, `TAB`, arrow buttons | Send the corresponding game key. |
+| `ESC`, `TAB`, `g`, `i`, `p`, `r` | Send the corresponding game key. |
 | `BAR` | Show or hide the shortcut bar; hold and drag it to reposition it. |
 | `SAVE` | Open the save folder options; shown only in the main menu. |
 | `ADDONS` | Open the add-ons folder/import options; shown only in the main menu. |

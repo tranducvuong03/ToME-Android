@@ -946,10 +946,10 @@ public final class TE4Activity extends SDLActivity {
         addControl(shortcutKeys, "⌨", 0, true);
         addControl(shortcutKeys, "ESC", 27, false);
         addControl(shortcutKeys, "TAB", 9, false);
-        addControl(shortcutKeys, "↑", SDLK_UP, false);
-        addControl(shortcutKeys, "↓", SDLK_DOWN, false);
-        addControl(shortcutKeys, "←", SDLK_LEFT, false);
-        addControl(shortcutKeys, "→", SDLK_RIGHT, false);
+        addControl(shortcutKeys, "g", 'g', false);
+        addControl(shortcutKeys, "i", 'i', false);
+        addControl(shortcutKeys, "p", 'p', false);
+        addControl(shortcutKeys, "r", 'r', false);
 
         for (final Shortcut shortcut : customShortcuts) {
             TextView control = makeControl(shortcut.label);
