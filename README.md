@@ -49,22 +49,13 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 
 ## Add-ons on Android
 
-On first launch, choose the existing `Download/Tales of Maj'Eyal` folder in the
-system folder picker, or choose another folder. The app creates `addons` and
-`save` subfolders there and keeps access only to the folder you selected. Put
-DLC archives (`.teaac`) and add-on archives (`.teaa`) in `addons`, then tap
-**ADDONS** → **Import Add-ons** to copy them into the game's private
-`game/addons` folder. Restart the game after importing to load them. You can
-skip folder selection at startup and choose a folder later from **SAVE** or
-**ADDONS**; no broad storage permission is required.
+1. **Setup:** Select `Download/Tales of Maj'Eyal` (or any folder) on first launch, or later via the **ADDONS** menu. The app will create an `addons` subfolder inside.
+2. **Install:** Put `.teaa` or `.teaac` files into `addons`, tap **ADDONS** → **Import Add-ons**, and restart the game.
 
-## Game saves on Android
+## Game Saves on Android
 
-The app backs up game saves to the selected folder's `save` subfolder when
-returning to the main menu and restores newer files from there when the game
-starts. Copy saved characters into this folder to restore them after
-reinstalling. Use **SAVE** → **Import Saves** to import files while the app is
-already running, or **Back Up Now** to copy the current saves immediately.
+1. **Auto-Sync:** Saves automatically back up to the `save` subfolder when returning to the main menu, and restore when the game starts.
+2. **Manual:** Copy old character files into `save` to restore them. Use **SAVE** → **Import Saves** (to load immediately) or **Back Up Now** (to force a backup).
 
 ## Licensing
 
