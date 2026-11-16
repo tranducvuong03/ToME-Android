@@ -1024,6 +1024,15 @@ static int map_set_grid(lua_State *L)
 
 	// Get the mo list
 	lua_rawgeti(L, LUA_REGISTRYINDEX, map->mo_list_ref);
+	if (!lua_istable(L, -1))
+	{
+		printf("C Map invalid object-list reference (%s); rebuilding it\n",
+			lua_typename(L, lua_type(L, -1)));
+		lua_pop(L, 1);
+		lua_newtable(L);
+		map->mo_list_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, map->mo_list_ref);
+	}
 
 	int i;
 	for (i = 0; i < map->zdepth; i++)

@@ -140,6 +140,7 @@ int thread_profile(void *data)
 {
 	profile_type *profile = (profile_type*)data;
 	lua_State *L = lua_open();  /* create state */
+	int thread_status = 0;
 	luaL_openlibs(L);  /* open libraries */
 	luaopen_core(L);
 	luaopen_socket_core(L);
@@ -158,26 +159,73 @@ int thread_profile(void *data)
 	profile->L = L;
 
 	// And run the lua engine pre init scripts
-	if (!luaL_loadfile(L, "/loader/pre-init.lua")) docall(L, 0, 0);
-	else lua_pop(L, 1);
+	if (luaL_loadfile(L, "/loader/pre-init.lua") != 0)
+	{
+		const char *error = lua_tostring(L, -1);
+		printf("[PROFILE THREAD] Could not load pre-init script: %s\n",
+			error ? error : "unknown error");
+		lua_pop(L, 1);
+		thread_status = 1;
+		goto cleanup;
+	}
+	if (docall(L, 0, 0) != 0)
+	{
+		printf("[PROFILE THREAD] Pre-init script failed; stopping\n");
+		thread_status = 1;
+		goto cleanup;
+	}
 
 	// Load the profile connector
-	if (!luaL_loadfile(L, "/profile-thread/init.lua")) docall(L, 0, 0);
-	else lua_pop(L, 1);
+	if (luaL_loadfile(L, "/profile-thread/init.lua") != 0)
+	{
+		const char *error = lua_tostring(L, -1);
+		printf("[PROFILE THREAD] Could not load profile connector: %s\n",
+			error ? error : "unknown error");
+		lua_pop(L, 1);
+		thread_status = 1;
+		goto cleanup;
+	}
+	if (docall(L, 0, 0) != 0)
+	{
+		printf("[PROFILE THREAD] Profile connector failed; stopping\n");
+		thread_status = 1;
+		goto cleanup;
+	}
+
+	lua_getglobal(L, "step_profile");
+	if (!lua_isfunction(L, -1))
+	{
+		printf("[PROFILE THREAD] Profile connector did not define step_profile\n");
+		lua_pop(L, 1);
+		thread_status = 1;
+		goto cleanup;
+	}
+	lua_pop(L, 1);
 
 	while (profile->running)
 	{
-		if (!profile->running) break;
-
 		lua_getglobal(L, "step_profile");
-		docall(L, 0, 0);
+		if (!lua_isfunction(L, -1))
+		{
+			printf("[PROFILE THREAD] step_profile is no longer available; stopping\n");
+			lua_pop(L, 1);
+			thread_status = 1;
+			break;
+		}
+		if (docall(L, 0, 0) != 0)
+		{
+			printf("[PROFILE THREAD] step_profile failed; stopping\n");
+			thread_status = 1;
+			break;
+		}
 	}
 
+cleanup:
 	// Cleanup
 	lua_close(L);
 	printf("Cleaned up profile thread\n");
 
-	return(0);
+	return thread_status;
 }
 
 // Runs on main thread

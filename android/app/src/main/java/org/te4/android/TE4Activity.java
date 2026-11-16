@@ -1,10 +1,13 @@
 package org.te4.android;
 
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.ContentUris;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.UriPermission;
 import android.content.pm.ActivityInfo;
 import android.content.res.AssetManager;
 import android.database.Cursor;
@@ -20,6 +23,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.system.ErrnoException;
 import android.system.Os;
@@ -45,6 +49,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -62,6 +67,7 @@ import org.json.JSONException;
 import org.libsdl.app.SDLActivity;
 
 public final class TE4Activity extends SDLActivity {
+    private static final long ALL_CONTROLS_TAP_TIMEOUT_MS = 500;
     private static final int SDLK_UP = 1073741906;
     private static final int SDLK_DOWN = 1073741905;
     private static final int SDLK_LEFT = 1073741904;
@@ -71,18 +77,19 @@ public final class TE4Activity extends SDLActivity {
     private static final int SDLK_KP_7 = 1073741919;
     private static final int SDLK_KP_9 = 1073741921;
     private static final int SDLK_RETURN = 13;
-    private static final int REQUEST_ADDONS_STORAGE = 0x5445;
-    private static final int REQUEST_INITIAL_SAVE_STORAGE = 0x5446;
-    private static final int REQUEST_SAVE_MANAGER_STORAGE = 0x5447;
-    private static final String ADDONS_FOLDER_PATH = "Download/Tales of Maj'Eyal/addons";
+    private static final int REQUEST_PUBLIC_STORAGE_TREE = 0x5448;
+    private static final int STORAGE_ACTION_INITIAL_SYNC = 1;
+    private static final int STORAGE_ACTION_ADDONS = 2;
+    private static final int STORAGE_ACTION_SAVE_MANAGER = 3;
+    private static final String PUBLIC_STORAGE_TREE_URI = "public_storage_tree_uri";
+    private static final String INITIAL_STORAGE_PICKER_SKIPPED = "initial_storage_picker_skipped";
     private static final String ADDONS_FOLDER_GUIDE =
             "Place .teaac DLC and .teaa add-on files here.txt";
-    private static final String SAVE_FOLDER_PATH = "Download/Tales of Maj'Eyal/save";
     private static final String SAVE_FOLDER_GUIDE = "Copy game saves into this folder.txt";
     private static final String SAVE_SYNC_READY_MARKER = ".te4-save-sync-ready";
     private static final String SAVE_SYNC_ERROR_MARKER = ".te4-save-sync-error";
     private static final String GAME_ARCHIVE_UPDATE_MARKER =
-            ".te4-game-archives-update-v4";
+            ".te4-game-archives-update-v5";
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
@@ -96,9 +103,22 @@ public final class TE4Activity extends SDLActivity {
     private TextView installStatus;
     private AlertDialog saveImportProgress;
     private boolean saveSyncInProgress;
+    private boolean gameDataReady;
+    private boolean nativeResumePending;
+    private int pendingStorageAction;
+    private boolean threeFingerGestureActive;
+    private boolean threeFingerGestureValid;
+    private boolean touchControlsHidden;
+    private long threeFingerGestureStartTime;
+    private float threeFingerGestureTouchSlop;
+    private final Map<Integer, float[]> touchPointerStartPositions = new HashMap<>();
+    private final Map<View, Integer> touchControlVisibilityBeforeHide = new HashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        if (savedInstanceState != null) {
+            pendingStorageAction = savedInstanceState.getInt("pending_storage_action");
+        }
         File saveSyncReadyMarker = new File(getFilesDir(), SAVE_SYNC_READY_MARKER);
         if (saveSyncReadyMarker.exists() && !saveSyncReadyMarker.delete()) {
             Log.e("TE4", "Could not clear previous save synchronization marker");
@@ -119,7 +139,8 @@ public final class TE4Activity extends SDLActivity {
         }
 
         File gameDataMarker = new File(getFilesDir(), ".te4-data-installed");
-        if (!gameDataMarker.isFile()) {
+        gameDataReady = gameDataMarker.isFile();
+        if (!gameDataReady) {
             File errorMarker = new File(getFilesDir(), ".te4-data-install-error");
             if (errorMarker.exists() && !errorMarker.delete()) {
                 Log.e("TE4", "Could not clear previous game data installation error");
@@ -134,10 +155,10 @@ public final class TE4Activity extends SDLActivity {
             try {
                 updateGameArchives();
             } catch (IOException e) {
-                Log.e("TE4", "Could not update the game archives", e);
+                Log.e("TE4", "Could not update bundled game files", e);
                 gameArchiveUpdateFailed = true;
             } catch (SecurityException e) {
-                Log.e("TE4", "Could not update the game archives", e);
+                Log.e("TE4", "Could not update bundled game files", e);
                 gameArchiveUpdateFailed = true;
             }
         }
@@ -172,6 +193,156 @@ public final class TE4Activity extends SDLActivity {
     }
 
     @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putInt("pending_storage_action", pendingStorageAction);
+        super.onSaveInstanceState(outState);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        int actionIndex = event.getActionIndex();
+        switch (action) {
+            case MotionEvent.ACTION_DOWN:
+                resetThreeFingerGesture();
+                threeFingerGestureStartTime = event.getEventTime();
+                rememberTouchPointer(event, actionIndex);
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                rememberTouchPointer(event, actionIndex);
+                if (threeFingerGestureActive) {
+                    threeFingerGestureValid = false;
+                    return true;
+                }
+                if (event.getPointerCount() == 3) {
+                    threeFingerGestureActive = true;
+                    threeFingerGestureValid = true;
+                    threeFingerGestureTouchSlop =
+                            ViewConfiguration.get(this).getScaledTouchSlop();
+                    MotionEvent cancel = MotionEvent.obtain(event);
+                    try {
+                        cancel.setAction(MotionEvent.ACTION_CANCEL);
+                        super.dispatchTouchEvent(cancel);
+                    } finally {
+                        cancel.recycle();
+                    }
+                    return true;
+                }
+                break;
+            case MotionEvent.ACTION_MOVE:
+            case MotionEvent.ACTION_POINTER_UP:
+                if (threeFingerGestureActive) {
+                    if (!areTouchPointersWithinSlop(event)) {
+                        threeFingerGestureValid = false;
+                    }
+                    return true;
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+                if (threeFingerGestureActive) {
+                    if (!areTouchPointersWithinSlop(event)) {
+                        threeFingerGestureValid = false;
+                    }
+                    boolean toggleControls = threeFingerGestureValid
+                            && event.getEventTime() - threeFingerGestureStartTime
+                                    <= ALL_CONTROLS_TAP_TIMEOUT_MS;
+                    resetThreeFingerGesture();
+                    if (toggleControls) toggleTouchControls();
+                    return true;
+                }
+                resetThreeFingerGesture();
+                break;
+            case MotionEvent.ACTION_CANCEL:
+                boolean gestureWasActive = threeFingerGestureActive;
+                resetThreeFingerGesture();
+                if (gestureWasActive) return true;
+                break;
+            default:
+                break;
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    private void rememberTouchPointer(MotionEvent event, int pointerIndex) {
+        touchPointerStartPositions.put(event.getPointerId(pointerIndex),
+                new float[] { event.getX(pointerIndex), event.getY(pointerIndex) });
+    }
+
+    private boolean areTouchPointersWithinSlop(MotionEvent event) {
+        for (int i = 0; i < event.getPointerCount(); i++) {
+            float[] start = touchPointerStartPositions.get(event.getPointerId(i));
+            if (start == null
+                    || Math.abs(event.getX(i) - start[0]) > threeFingerGestureTouchSlop
+                    || Math.abs(event.getY(i) - start[1]) > threeFingerGestureTouchSlop) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void resetThreeFingerGesture() {
+        threeFingerGestureActive = false;
+        threeFingerGestureValid = false;
+        touchPointerStartPositions.clear();
+    }
+
+    private void toggleTouchControls() {
+        View[] controls = {
+                shortcutBar, directionPad, barToggle, padToggle, saveButton, addonsButton
+        };
+        if (!touchControlsHidden) {
+            for (View control : controls) {
+                if (control == null) continue;
+                touchControlVisibilityBeforeHide.put(control, control.getVisibility());
+                control.setVisibility(View.GONE);
+            }
+            touchControlsHidden = true;
+            return;
+        }
+
+        touchControlsHidden = false;
+        for (View control : controls) {
+            if (control == null) continue;
+            Integer visibility = touchControlVisibilityBeforeHide.remove(control);
+            if (visibility != null) control.setVisibility(visibility);
+        }
+    }
+
+    private void setTouchControlVisibility(View control, int visibility) {
+        if (control == null) return;
+        if (touchControlsHidden && touchControlVisibilityBeforeHide.containsKey(control)) {
+            touchControlVisibilityBeforeHide.put(control, visibility);
+            control.setVisibility(View.GONE);
+        } else {
+            control.setVisibility(visibility);
+        }
+    }
+
+    @Override
+    protected void resumeNativeThread() {
+        if (!gameDataReady) {
+            nativeResumePending = true;
+            return;
+        }
+        nativeResumePending = false;
+        super.resumeNativeThread();
+    }
+
+    @Override
+    protected void pauseNativeThread() {
+        nativeResumePending = false;
+        super.pauseNativeThread();
+    }
+
+    private void markGameDataReady() {
+        gameDataReady = true;
+        if (nativeResumePending) {
+            nativeResumePending = false;
+            super.resumeNativeThread();
+        }
+    }
+
+    @Override
     protected String[] getLibraries() {
         return new String[] { "SDL2", "main" };
     }
@@ -186,28 +357,26 @@ public final class TE4Activity extends SDLActivity {
     private static native boolean nativeRedirectLog(int fd);
 
     private void showAddonsManager() {
-        if (!hasAddonsStoragePermission()) {
-            requestPermissions(new String[] {
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-            }, REQUEST_ADDONS_STORAGE);
+        Uri storageTree = getPublicStorageTree();
+        if (storageTree == null) {
+            requestPublicStorageTree(STORAGE_ACTION_ADDONS);
             return;
         }
         try {
-            ensureAddonsFolderExists();
+            ensureAddonsFolderExists(storageTree);
         } catch (IOException e) {
-            Log.e("TE4", "Could not create the public add-ons folder", e);
+            Log.e("TE4", "Could not create the add-ons folder", e);
             Toast.makeText(this, "Could not create the add-ons folder", Toast.LENGTH_LONG).show();
             return;
         } catch (SecurityException e) {
-            Log.e("TE4", "Could not access the public add-ons folder", e);
+            Log.e("TE4", "Could not access the add-ons folder", e);
             Toast.makeText(this, "Could not access the add-ons folder", Toast.LENGTH_LONG).show();
             return;
         }
 
-        String message = "Put DLC archives (.teaac) and add-on archives (.teaa) in:\n\n"
-                + ADDONS_FOLDER_PATH
-                + "\n\nThe folder is ready. Tap Import Add-ons to copy packages "
+        String message = "Put DLC archives (.teaac) and add-on archives (.teaa) in the "
+                + "addons subfolder of the shared folder you selected. Tap Import Add-ons "
+                + "to copy packages "
                 + "into the game. Restart the game afterward to load them.";
 
         new AlertDialog.Builder(this)
@@ -224,31 +393,34 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private void prepareInitialSaveSync() {
-        if (hasAddonsStoragePermission()) {
+        if (getPublicStorageTree() != null) {
             startInitialSaveSync();
             return;
         }
 
         android.content.SharedPreferences preferences =
                 getSharedPreferences("te4_controls", MODE_PRIVATE);
-        if (!preferences.getBoolean("save_storage_permission_denied", false)) {
-            requestPermissions(new String[] {
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-            }, REQUEST_INITIAL_SAVE_STORAGE);
+        if (pendingStorageAction != 0) return;
+        if (!preferences.getBoolean(INITIAL_STORAGE_PICKER_SKIPPED, false)) {
+            requestPublicStorageTree(STORAGE_ACTION_INITIAL_SYNC);
         } else {
             markSaveSyncReady();
         }
     }
 
     private void startInitialSaveSync() {
+        final Uri storageTree = getPublicStorageTree();
+        if (storageTree == null) {
+            markSaveSyncReady();
+            return;
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    ensureSaveFolderExists();
-                    int imported = syncSaveDirectory(
-                            getPublicSaveFolder(), getPrivateSaveFolder(), false);
+                    Uri saveFolder = ensureSaveFolderExists(storageTree);
+                    int imported = syncSaveDirectoryFromTree(
+                            storageTree, saveFolder, getPrivateSaveFolder(), false);
                     Log.i("TE4", "Restored " + imported + " save file(s) from public storage");
                 } catch (IOException e) {
                     Log.e("TE4", "Could not restore game saves", e);
@@ -281,30 +453,28 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private void showSaveManager() {
-        if (!hasAddonsStoragePermission()) {
-            requestPermissions(new String[] {
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-            }, REQUEST_SAVE_MANAGER_STORAGE);
+        Uri storageTree = getPublicStorageTree();
+        if (storageTree == null) {
+            requestPublicStorageTree(STORAGE_ACTION_SAVE_MANAGER);
             return;
         }
 
         try {
-            ensureSaveFolderExists();
+            ensureSaveFolderExists(storageTree);
         } catch (IOException e) {
-            Log.e("TE4", "Could not create the public save folder", e);
+            Log.e("TE4", "Could not create the save folder", e);
             Toast.makeText(this, "Could not create the save folder", Toast.LENGTH_LONG).show();
             return;
         } catch (SecurityException e) {
-            Log.e("TE4", "Could not access the public save folder", e);
+            Log.e("TE4", "Could not access the save folder", e);
             Toast.makeText(this, "Could not access the save folder", Toast.LENGTH_LONG).show();
             return;
         }
 
         new AlertDialog.Builder(this)
                 .setTitle("Game saves")
-                .setMessage("Save folder:\n\n" + SAVE_FOLDER_PATH
-                        + "\n\nSaves are backed up when you return to the main menu and "
+                .setMessage("The save subfolder of your selected shared folder contains "
+                        + "backups. Saves are backed up when you return to the main menu and "
                         + "restored when the game starts. Copy saves here to restore them. "
                         + "Import replaces files with matching names.")
                 .setPositiveButton("Import Saves", new DialogInterface.OnClickListener() {
@@ -323,89 +493,181 @@ public final class TE4Activity extends SDLActivity {
                 .show();
     }
 
-    private void ensureSaveFolderExists() throws IOException {
-        File folder = getPublicSaveFolder();
-        if (!folder.isDirectory() && !folder.mkdirs()) {
-            throw new IOException("Could not create the save folder");
-        }
-        File guide = new File(folder, SAVE_FOLDER_GUIDE);
-        if (!guide.isFile() || guide.length() == 0) {
-            try (FileOutputStream output = new FileOutputStream(guide)) {
-                output.write(("Copy saved character folders here. They are imported when "
-                        + "the game starts and backed up when you return to the main menu.\n")
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            }
-        }
-    }
-
-    private File getPublicSaveFolder() {
-        File downloads = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS);
-        return new File(new File(downloads, "Tales of Maj'Eyal"), "save");
-    }
-
     private File getPrivateSaveFolder() {
         return new File(getFilesDir(), ".t-engine/4.0/tome/save");
     }
 
-    private boolean hasAddonsStoragePermission() {
-        return checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE)
-                        == android.content.pm.PackageManager.PERMISSION_GRANTED
-                && checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        == android.content.pm.PackageManager.PERMISSION_GRANTED;
-    }
-
     private void startAddonsImport() {
-        if (!hasAddonsStoragePermission()) {
-            showAddonsManager();
+        Uri storageTree = getPublicStorageTree();
+        if (storageTree == null) {
+            requestPublicStorageTree(STORAGE_ACTION_ADDONS);
             return;
         }
-        importAddonsInBackground();
+        importAddonsInBackground(storageTree);
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_INITIAL_SAVE_STORAGE) {
-            if (hasAddonsStoragePermission()) {
-                getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
-                        .remove("save_storage_permission_denied").apply();
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_PUBLIC_STORAGE_TREE) return;
+
+        int action = pendingStorageAction;
+        pendingStorageAction = 0;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            handleStorageTreeSelectionCanceled(action);
+            return;
+        }
+
+        Uri treeUri = data.getData();
+        int grantFlags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        int requiredFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+        if (grantFlags != requiredFlags) {
+            Log.e("TE4", "The selected folder did not grant read and write access");
+            handleStorageTreeSelectionFailed(action);
+            return;
+        }
+        try {
+            getContentResolver().takePersistableUriPermission(treeUri, grantFlags);
+            boolean saved = getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
+                    .putString(PUBLIC_STORAGE_TREE_URI, treeUri.toString())
+                    .remove(INITIAL_STORAGE_PICKER_SKIPPED)
+                    .commit();
+            if (!saved) throw new IOException("Could not save folder access");
+        } catch (SecurityException e) {
+            Log.e("TE4", "Could not retain access to the selected folder", e);
+            handleStorageTreeSelectionFailed(action);
+            return;
+        } catch (IOException e) {
+            Log.e("TE4", "Could not remember the selected folder", e);
+            handleStorageTreeSelectionFailed(action);
+            return;
+        }
+
+        switch (action) {
+            case STORAGE_ACTION_INITIAL_SYNC:
                 startInitialSaveSync();
-            } else {
-                getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
-                        .putBoolean("save_storage_permission_denied", true).apply();
-                Toast.makeText(this, "Save backup is disabled without storage permission",
-                        Toast.LENGTH_LONG).show();
-                markSaveSyncReady();
-            }
-            return;
-        }
-        if (requestCode == REQUEST_SAVE_MANAGER_STORAGE) {
-            if (hasAddonsStoragePermission()) {
+                break;
+            case STORAGE_ACTION_ADDONS:
+                showAddonsManager();
+                break;
+            case STORAGE_ACTION_SAVE_MANAGER:
                 showSaveManager();
-            } else {
-                Toast.makeText(this, "Storage permission is required to manage saves",
-                        Toast.LENGTH_LONG).show();
-            }
-            return;
-        }
-        if (requestCode != REQUEST_ADDONS_STORAGE) return;
-        if (hasAddonsStoragePermission()) {
-            showAddonsManager();
-        } else {
-            Toast.makeText(this, "Storage permission is required to import add-ons",
-                    Toast.LENGTH_LONG).show();
+                break;
+            default:
+                Log.e("TE4", "Folder was selected without a pending storage action");
+                break;
         }
     }
 
-    private void importAddonsInBackground() {
+    private void requestPublicStorageTree(final int action) {
+        new AlertDialog.Builder(this)
+                .setTitle("Choose shared game folder")
+                .setMessage("Select your existing Tales of Maj'Eyal folder if available. "
+                        + "The game will use or create its save and addons subfolders there. "
+                        + "If it does not exist, create a dedicated folder in Files first. "
+                        + "You can skip this now and grant folder access later from SAVE or ADDONS.")
+                .setPositiveButton("Choose folder", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+                        pendingStorageAction = action;
+                        try {
+                            startActivityForResult(intent, REQUEST_PUBLIC_STORAGE_TREE);
+                        } catch (ActivityNotFoundException e) {
+                            pendingStorageAction = 0;
+                            Log.e("TE4", "No folder picker is available", e);
+                            Toast.makeText(TE4Activity.this,
+                                    "Could not open the folder picker", Toast.LENGTH_LONG).show();
+                            handleStorageTreeSelectionFailed(action);
+                        }
+                    }
+                })
+                .setNegativeButton(action == STORAGE_ACTION_INITIAL_SYNC ? "Skip" : "Cancel",
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                handleStorageTreeSelectionCanceled(action);
+                            }
+                        })
+                .show();
+    }
+
+    private void handleStorageTreeSelectionCanceled(int action) {
+        if (action == STORAGE_ACTION_INITIAL_SYNC) {
+            getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
+                    .putBoolean(INITIAL_STORAGE_PICKER_SKIPPED, true).apply();
+            markSaveSyncReady();
+        } else {
+            Toast.makeText(this, "Folder selection canceled", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void handleStorageTreeSelectionFailed(int action) {
+        if (action == STORAGE_ACTION_INITIAL_SYNC) {
+            getSharedPreferences("te4_controls", MODE_PRIVATE).edit()
+                    .putBoolean(INITIAL_STORAGE_PICKER_SKIPPED, true).apply();
+            markSaveSyncReady();
+        }
+        Toast.makeText(this, "Could not access the selected folder", Toast.LENGTH_LONG).show();
+    }
+
+    private Uri getPublicStorageTree() {
+        android.content.SharedPreferences preferences =
+                getSharedPreferences("te4_controls", MODE_PRIVATE);
+        String storedUri = preferences.getString(PUBLIC_STORAGE_TREE_URI, null);
+        if (storedUri == null) return null;
+
+        Uri treeUri = Uri.parse(storedUri);
+        for (UriPermission permission : getContentResolver().getPersistedUriPermissions()) {
+            if (treeUri.equals(permission.getUri())
+                    && permission.isReadPermission()
+                    && permission.isWritePermission()) {
+                return treeUri;
+            }
+        }
+
+        Log.w("TE4", "Saved folder access is no longer available");
+        preferences.edit().remove(PUBLIC_STORAGE_TREE_URI).apply();
+        return null;
+    }
+
+    private Uri getTreeRootDocument(Uri treeUri) throws IOException {
+        try {
+            String documentId = DocumentsContract.getTreeDocumentId(treeUri);
+            return DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Invalid shared game folder", e);
+        }
+    }
+
+    private Uri ensureSaveFolderExists(Uri treeUri) throws IOException {
+        Uri folder = ensureSafDirectory(treeUri, getTreeRootDocument(treeUri), "save");
+        ensureGuideFile(treeUri, folder, SAVE_FOLDER_GUIDE,
+                "Copy saved character folders here. They are imported when the game starts "
+                        + "and backed up when you return to the main menu.\n");
+        return folder;
+    }
+
+    private Uri ensureAddonsFolderExists(Uri treeUri) throws IOException {
+        Uri folder = ensureSafDirectory(treeUri, getTreeRootDocument(treeUri), "addons");
+        ensureGuideFile(treeUri, folder, ADDONS_FOLDER_GUIDE,
+                "Put .teaac DLC and .teaa add-on archives in this folder.\n");
+        return folder;
+    }
+
+    private void importAddonsInBackground(final Uri treeUri) {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    ensureAddonsFolderExists();
-                    final int imported = importAddonArchives();
+                    Uri addonsFolder = ensureAddonsFolderExists(treeUri);
+                    final int imported = importAddonArchives(treeUri, addonsFolder);
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -416,7 +678,7 @@ public final class TE4Activity extends SDLActivity {
                     Log.e("TE4", "Could not import add-on archives", e);
                     showAddonImportError("Could not import add-on files");
                 } catch (SecurityException e) {
-                    Log.e("TE4", "Could not access the add-ons folder", e);
+                    Log.e("TE4", "Could not access the selected add-ons folder", e);
                     showAddonImportError("Could not access the add-ons folder");
                 }
             }
@@ -433,7 +695,8 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private void startSaveBackupInBackground() {
-        if (!hasAddonsStoragePermission()) return;
+        final Uri storageTree = getPublicStorageTree();
+        if (storageTree == null) return;
         if (!beginSaveSync()) {
             Toast.makeText(this, "Save synchronization is already running",
                     Toast.LENGTH_SHORT).show();
@@ -443,15 +706,15 @@ public final class TE4Activity extends SDLActivity {
             @Override
             public void run() {
                 try {
-                    ensureSaveFolderExists();
-                    int copied = syncSaveDirectory(
-                            getPrivateSaveFolder(), getPublicSaveFolder(), false);
+                    Uri saveFolder = ensureSaveFolderExists(storageTree);
+                    int copied = syncSaveDirectoryToTree(getPrivateSaveFolder(),
+                            storageTree, saveFolder, false);
                     Log.i("TE4", "Backed up " + copied + " game save file(s)");
                 } catch (IOException e) {
                     Log.e("TE4", "Could not back up game saves", e);
                     showSaveSyncError("Could not back up game saves");
                 } catch (SecurityException e) {
-                    Log.e("TE4", "Could not access the public save folder", e);
+                    Log.e("TE4", "Could not access the selected save folder", e);
                     showSaveSyncError("Could not access the save folder");
                 } finally {
                     endSaveSync();
@@ -461,7 +724,11 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private void startSaveImportInBackground() {
-        if (!hasAddonsStoragePermission()) return;
+        final Uri storageTree = getPublicStorageTree();
+        if (storageTree == null) {
+            requestPublicStorageTree(STORAGE_ACTION_SAVE_MANAGER);
+            return;
+        }
         if (!beginSaveSync()) {
             Toast.makeText(this, "Save synchronization is already running",
                     Toast.LENGTH_SHORT).show();
@@ -476,9 +743,9 @@ public final class TE4Activity extends SDLActivity {
             @Override
             public void run() {
                 try {
-                    ensureSaveFolderExists();
-                    int imported = syncSaveDirectory(
-                            getPublicSaveFolder(), getPrivateSaveFolder(), true);
+                    Uri saveFolder = ensureSaveFolderExists(storageTree);
+                    int imported = syncSaveDirectoryFromTree(storageTree, saveFolder,
+                            getPrivateSaveFolder(), true);
                     final String message = imported == 0
                             ? "No save files found in the save folder"
                             : "Imported " + imported + " save file(s)";
@@ -493,7 +760,7 @@ public final class TE4Activity extends SDLActivity {
                     Log.e("TE4", "Could not import game saves", e);
                     showSaveSyncError("Could not import game saves");
                 } catch (SecurityException e) {
-                    Log.e("TE4", "Could not access the public save folder", e);
+                    Log.e("TE4", "Could not access the selected save folder", e);
                     showSaveSyncError("Could not access the save folder");
                 } finally {
                     endSaveSync();
@@ -512,26 +779,141 @@ public final class TE4Activity extends SDLActivity {
         saveSyncInProgress = false;
     }
 
-    private int syncSaveDirectory(File sourceDirectory, File destinationDirectory,
-            boolean overwrite) throws IOException {
-        if (!sourceDirectory.isDirectory()) return 0;
+    private static final class SafEntry {
+        final Uri uri;
+        final String name;
+        final String mimeType;
+        final long size;
+        final long lastModified;
+
+        SafEntry(Uri uri, String name, String mimeType, long size, long lastModified) {
+            this.uri = uri;
+            this.name = name;
+            this.mimeType = mimeType;
+            this.size = size;
+            this.lastModified = lastModified;
+        }
+
+        boolean isDirectory() {
+            return DocumentsContract.Document.MIME_TYPE_DIR.equals(mimeType);
+        }
+    }
+
+    private List<SafEntry> listSafEntries(Uri treeUri, Uri directoryUri) throws IOException {
+        final String documentId;
+        try {
+            documentId = DocumentsContract.getDocumentId(directoryUri);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Invalid shared game folder", e);
+        }
+        Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId);
+        String[] projection = {
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+        };
+        ArrayList<SafEntry> entries = new ArrayList<>();
+        try (Cursor cursor = getContentResolver().query(
+                childrenUri, projection, null, null, null)) {
+            if (cursor == null) throw new IOException("Could not list the selected folder");
+            int idColumn = cursor.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+            int nameColumn = cursor.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            int mimeColumn = cursor.getColumnIndexOrThrow(
+                    DocumentsContract.Document.COLUMN_MIME_TYPE);
+            int sizeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE);
+            int modifiedColumn =
+                    cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED);
+            while (cursor.moveToNext()) {
+                String childId = cursor.getString(idColumn);
+                String name = cursor.getString(nameColumn);
+                String mimeType = cursor.getString(mimeColumn);
+                if (childId == null || !isSafeDocumentName(name)) {
+                    throw new IOException("The selected folder returned an invalid entry");
+                }
+                long size = sizeColumn < 0 || cursor.isNull(sizeColumn)
+                        ? -1 : cursor.getLong(sizeColumn);
+                long modified = modifiedColumn < 0 || cursor.isNull(modifiedColumn)
+                        ? 0 : cursor.getLong(modifiedColumn);
+                Uri childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId);
+                entries.add(new SafEntry(childUri, name, mimeType, size, modified));
+            }
+        }
+        return entries;
+    }
+
+    private boolean isSafeDocumentName(String name) {
+        return name != null && !name.isEmpty() && !".".equals(name) && !"..".equals(name)
+                && !name.contains("/") && !name.contains("\\");
+    }
+
+    private SafEntry findSafEntry(Uri treeUri, Uri directoryUri, String name)
+            throws IOException {
+        for (SafEntry entry : listSafEntries(treeUri, directoryUri)) {
+            if (name.equals(entry.name)) return entry;
+        }
+        return null;
+    }
+
+    private Uri ensureSafDirectory(Uri treeUri, Uri parentUri, String name) throws IOException {
+        SafEntry existing = findSafEntry(treeUri, parentUri, name);
+        if (existing != null) {
+            if (!existing.isDirectory()) {
+                throw new IOException("A file conflicts with the folder " + name);
+            }
+            return existing.uri;
+        }
+        Uri created = DocumentsContract.createDocument(getContentResolver(), parentUri,
+                DocumentsContract.Document.MIME_TYPE_DIR, name);
+        if (created == null) throw new IOException("Could not create folder " + name);
+        try {
+            return DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri, DocumentsContract.getDocumentId(created));
+        } catch (IllegalArgumentException e) {
+            throw new IOException("Could not access the created folder " + name, e);
+        }
+    }
+
+    private void ensureGuideFile(Uri treeUri, Uri directoryUri, String name, String contents)
+            throws IOException {
+        SafEntry guide = findSafEntry(treeUri, directoryUri, name);
+        Uri guideUri;
+        if (guide == null) {
+            guideUri = DocumentsContract.createDocument(getContentResolver(), directoryUri,
+                    "text/plain", name);
+            if (guideUri == null) throw new IOException("Could not create " + name);
+        } else {
+            if (guide.isDirectory()) throw new IOException("A folder conflicts with " + name);
+            if (guide.size > 0) return;
+            guideUri = guide.uri;
+        }
+
+        OutputStream output = getContentResolver().openOutputStream(guideUri, "wt");
+        if (output == null) throw new IOException("Could not write " + name);
+        try (OutputStream stream = output) {
+            stream.write(contents.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    private int syncSaveDirectoryFromTree(Uri treeUri, Uri sourceDirectory,
+            File destinationDirectory, boolean overwrite) throws IOException {
         if (!destinationDirectory.isDirectory() && !destinationDirectory.mkdirs()) {
             throw new IOException("Could not create " + destinationDirectory);
         }
-
-        File[] entries = sourceDirectory.listFiles();
-        if (entries == null) throw new IOException("Could not list " + sourceDirectory);
         int copied = 0;
-        for (File entry : entries) {
-            if (SAVE_FOLDER_GUIDE.equals(entry.getName())) continue;
-            copied += syncSaveEntry(entry, new File(destinationDirectory, entry.getName()),
-                    overwrite);
+        for (SafEntry entry : listSafEntries(treeUri, sourceDirectory)) {
+            if (SAVE_FOLDER_GUIDE.equals(entry.name)) continue;
+            copied += syncSafEntryToFile(treeUri, entry,
+                    new File(destinationDirectory, entry.name), overwrite);
         }
         return copied;
     }
 
-    private int syncSaveEntry(File source, File destination, boolean overwrite)
-            throws IOException {
+    private int syncSafEntryToFile(Uri treeUri, SafEntry source, File destination,
+            boolean overwrite) throws IOException {
         if (source.isDirectory()) {
             if (destination.exists() && !destination.isDirectory()) {
                 throw new IOException("Save file conflicts with a directory: " + destination);
@@ -539,62 +921,129 @@ public final class TE4Activity extends SDLActivity {
             if (!destination.isDirectory() && !destination.mkdirs()) {
                 throw new IOException("Could not create " + destination);
             }
-            File[] entries = source.listFiles();
-            if (entries == null) throw new IOException("Could not list " + source);
             int copied = 0;
-            for (File entry : entries) {
-                copied += syncSaveEntry(entry, new File(destination, entry.getName()), overwrite);
+            for (SafEntry entry : listSafEntries(treeUri, source.uri)) {
+                copied += syncSafEntryToFile(treeUri, entry,
+                        new File(destination, entry.name), overwrite);
             }
             return copied;
-        }
-        if (!source.isFile()) {
-            throw new IOException("Unsupported save entry: " + source);
         }
         if (destination.exists() && !destination.isFile()) {
             throw new IOException("Save directory conflicts with a file: " + destination);
         }
         if (!overwrite && destination.isFile()) {
-            long sourceModified = source.lastModified();
             long destinationModified = destination.lastModified();
-            boolean newer = sourceModified > destinationModified;
-            boolean sameTimeDifferentSize = sourceModified == destinationModified
-                    && source.length() != destination.length();
-            if (!newer && !sameTimeDifferentSize) return 0;
+            if (source.lastModified > 0 && destinationModified > 0) {
+                boolean newer = source.lastModified > destinationModified;
+                boolean sameTimeDifferentSize = source.lastModified == destinationModified
+                        && source.size >= 0 && source.size != destination.length();
+                if (!newer && !sameTimeDifferentSize) return 0;
+            }
         }
 
-        copySaveFile(source, destination);
+        copySafFileToPrivate(source, destination);
         return 1;
     }
 
-    private void copySaveFile(File source, File destination) throws IOException {
+    private void copySafFileToPrivate(SafEntry source, File destination) throws IOException {
         File temporary = File.createTempFile(
                 "te4-save-", ".tmp", destination.getParentFile());
         try {
-            long sourceSize = source.length();
-            try (InputStream input = new FileInputStream(source);
+            InputStream input = getContentResolver().openInputStream(source.uri);
+            if (input == null) throw new IOException("Could not read save file " + source.name);
+            try (InputStream stream = input;
                  FileOutputStream output = new FileOutputStream(temporary)) {
                 byte[] buffer = new byte[32 * 1024];
                 int count;
-                while ((count = input.read(buffer)) != -1) {
-                    output.write(buffer, 0, count);
-                }
+                while ((count = stream.read(buffer)) != -1) output.write(buffer, 0, count);
             }
-            if (temporary.length() != sourceSize || source.length() != sourceSize) {
-                throw new IOException("Save file changed while being copied: " + source.getName());
+            if (source.size >= 0 && temporary.length() != source.size) {
+                throw new IOException("Save file size changed while copying: " + source.name);
             }
             try {
                 Os.rename(temporary.getAbsolutePath(), destination.getAbsolutePath());
             } catch (ErrnoException e) {
                 throw new IOException("Could not install save file: " + destination.getName(), e);
             }
-            if (source.lastModified() > 0) {
-                destination.setLastModified(source.lastModified());
-            }
+            if (source.lastModified > 0) destination.setLastModified(source.lastModified);
         } finally {
             if (temporary.exists() && !temporary.delete()) {
                 Log.e("TE4", "Could not remove temporary save copy " + temporary.getName());
             }
         }
+    }
+
+    private int syncSaveDirectoryToTree(File sourceDirectory, Uri treeUri,
+            Uri destinationDirectory, boolean overwrite) throws IOException {
+        if (!sourceDirectory.isDirectory()) return 0;
+        File[] entries = sourceDirectory.listFiles();
+        if (entries == null) throw new IOException("Could not list " + sourceDirectory);
+        int copied = 0;
+        for (File entry : entries) {
+            copied += syncFileEntryToSaf(entry, treeUri, destinationDirectory, overwrite);
+        }
+        return copied;
+    }
+
+    private int syncFileEntryToSaf(File source, Uri treeUri, Uri destinationDirectory,
+            boolean overwrite) throws IOException {
+        SafEntry existing = findSafEntry(treeUri, destinationDirectory, source.getName());
+        if (source.isDirectory()) {
+            if (existing != null && !existing.isDirectory()) {
+                throw new IOException("Save file conflicts with a directory: " + source.getName());
+            }
+            Uri childDirectory = existing == null
+                    ? ensureSafDirectory(treeUri, destinationDirectory, source.getName())
+                    : existing.uri;
+            File[] entries = source.listFiles();
+            if (entries == null) throw new IOException("Could not list " + source);
+            int copied = 0;
+            for (File entry : entries) {
+                copied += syncFileEntryToSaf(entry, treeUri, childDirectory, overwrite);
+            }
+            return copied;
+        }
+        if (!source.isFile()) throw new IOException("Unsupported save entry: " + source);
+        if (existing != null && existing.isDirectory()) {
+            throw new IOException("Save directory conflicts with a file: " + source.getName());
+        }
+        if (!overwrite && existing != null) {
+            long sourceModified = source.lastModified();
+            if (sourceModified > 0 && existing.lastModified > 0) {
+                boolean newer = sourceModified > existing.lastModified;
+                boolean sameTimeDifferentSize = sourceModified == existing.lastModified
+                        && existing.size >= 0 && source.length() != existing.size;
+                if (!newer && !sameTimeDifferentSize) return 0;
+            }
+        }
+
+        Uri destination = existing == null
+                ? DocumentsContract.createDocument(getContentResolver(), destinationDirectory,
+                        "application/octet-stream", source.getName())
+                : existing.uri;
+        if (destination == null) {
+            throw new IOException("Could not create save file " + source.getName());
+        }
+        long sourceSize = source.length();
+        long copied = 0;
+        try (InputStream input = new FileInputStream(source)) {
+            OutputStream output = getContentResolver().openOutputStream(destination, "wt");
+            if (output == null) {
+                throw new IOException("Could not write save file " + source.getName());
+            }
+            try (OutputStream stream = output) {
+                byte[] buffer = new byte[32 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    stream.write(buffer, 0, count);
+                    copied += count;
+                }
+            }
+        }
+        if (copied != sourceSize || source.length() != sourceSize) {
+            throw new IOException("Save file changed while being copied: " + source.getName());
+        }
+        return 1;
     }
 
     private void showSaveSyncError(final String message) {
@@ -619,37 +1068,19 @@ public final class TE4Activity extends SDLActivity {
             @Override
             public void run() {
                 if (addonsButton != null) {
-                    addonsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+                    setTouchControlVisibility(
+                            addonsButton, visible ? View.VISIBLE : View.GONE);
                 }
                 if (saveButton != null) {
-                    saveButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+                    setTouchControlVisibility(
+                            saveButton, visible ? View.VISIBLE : View.GONE);
                 }
                 if (visible) startSaveBackupInBackground();
             }
         });
     }
 
-    private void ensureAddonsFolderExists() throws IOException {
-        File folder = getLegacyAddonsFolder();
-        if (!folder.isDirectory() && !folder.mkdirs()) {
-            throw new IOException("Could not create the add-ons folder");
-        }
-        File guide = new File(folder, ADDONS_FOLDER_GUIDE);
-        if (!guide.isFile() || guide.length() == 0) {
-            try (FileOutputStream output = new FileOutputStream(guide)) {
-                output.write(("Put .teaac DLC and .teaa add-on archives in this folder.\n")
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            }
-        }
-    }
-
-    private File getLegacyAddonsFolder() {
-        File downloads = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS);
-        return new File(new File(downloads, "Tales of Maj'Eyal"), "addons");
-    }
-
-    private int importAddonArchives() throws IOException {
+    private int importAddonArchives(Uri treeUri, Uri publicAddonsFolder) throws IOException {
         if (!new File(getFilesDir(), ".te4-data-installed").isFile()) {
             throw new IOException("Game data is not installed yet");
         }
@@ -658,17 +1089,14 @@ public final class TE4Activity extends SDLActivity {
             throw new IOException("Could not create the game addon directory");
         }
 
-        File[] files = getLegacyAddonsFolder().listFiles();
-        if (files == null) throw new IOException("Could not list the add-ons folder");
-
         int imported = 0;
-        for (File file : files) {
-            if (!file.isFile() || !isAddonArchive(file.getName())) continue;
-            try (InputStream input = new FileInputStream(file)) {
-                if (importAddonArchive(addonsDirectory, file.getName(), file.length(),
-                        file.lastModified(), input)) {
-                    imported++;
-                }
+        for (SafEntry file : listSafEntries(treeUri, publicAddonsFolder)) {
+            if (file.isDirectory() || !isAddonArchive(file.name)) continue;
+            InputStream input = getContentResolver().openInputStream(file.uri);
+            if (input == null) throw new IOException("Could not read add-on file " + file.name);
+            if (importAddonArchive(addonsDirectory, file.name, file.size,
+                    file.lastModified, input)) {
+                imported++;
             }
         }
         return imported;
@@ -729,37 +1157,46 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private void updateGameArchives() throws IOException {
-        replaceBundledArchive("game/engines/te4-1.7.6.teae",
+        replaceBundledAsset("game/engines/te4-1.7.6.teae",
                 new File(getFilesDir(), "game/engines/te4-1.7.6.teae"),
                 "te4-1.7.6.teae.tmp");
-        replaceBundledArchive("game/modules/boot-te4-1.7.6.team",
+        replaceBundledAsset("game/modules/boot-te4-1.7.6.team",
                 new File(getFilesDir(), "game/modules/boot-te4-1.7.6.team"),
                 "boot-te4-1.7.6.team.tmp");
+        replaceBundledAsset("game/profile-thread/init.lua",
+                new File(getFilesDir(), "game/profile-thread/init.lua"),
+                "profile-thread-init.lua.tmp");
+        replaceBundledAsset("game/profile-thread/Client.lua",
+                new File(getFilesDir(), "game/profile-thread/Client.lua"),
+                "profile-thread-client.lua.tmp");
+        replaceBundledAsset("game/profile-thread/UserChat.lua",
+                new File(getFilesDir(), "game/profile-thread/UserChat.lua"),
+                "profile-thread-user-chat.lua.tmp");
         File marker = new File(getFilesDir(), GAME_ARCHIVE_UPDATE_MARKER);
         if (!marker.createNewFile() && !marker.isFile()) {
             throw new IOException("Could not record the game archive update");
         }
     }
 
-    private void replaceBundledArchive(String assetPath, File archive, String temporaryName)
+    private void replaceBundledAsset(String assetPath, File destination, String temporaryName)
             throws IOException {
-        File temporaryArchive = new File(archive.getParentFile(), temporaryName);
+        File temporaryAsset = new File(destination.getParentFile(), temporaryName);
         try {
-            if (temporaryArchive.exists() && !temporaryArchive.delete()) {
-                throw new IOException("Could not clear an incomplete archive update");
+            if (temporaryAsset.exists() && !temporaryAsset.delete()) {
+                throw new IOException("Could not clear an incomplete game file update");
             }
-            copyAssetTree(getAssets(), assetPath, temporaryArchive);
-            if (!temporaryArchive.isFile() || temporaryArchive.length() == 0) {
-                throw new IOException("Updated archive is empty: " + assetPath);
+            copyAssetTree(getAssets(), assetPath, temporaryAsset);
+            if (!temporaryAsset.isFile() || temporaryAsset.length() == 0) {
+                throw new IOException("Updated game file is empty: " + assetPath);
             }
             try {
-                Os.rename(temporaryArchive.getAbsolutePath(), archive.getAbsolutePath());
+                Os.rename(temporaryAsset.getAbsolutePath(), destination.getAbsolutePath());
             } catch (ErrnoException e) {
-                throw new IOException("Could not replace archive: " + assetPath, e);
+                throw new IOException("Could not replace game file: " + assetPath, e);
             }
         } finally {
-            if (temporaryArchive.exists() && !temporaryArchive.delete()) {
-                Log.e("TE4", "Could not remove temporary archive " + temporaryName);
+            if (temporaryAsset.exists() && !temporaryAsset.delete()) {
+                Log.e("TE4", "Could not remove temporary game file " + temporaryName);
             }
         }
     }
@@ -868,7 +1305,9 @@ public final class TE4Activity extends SDLActivity {
         restoreOverlayWhenLaidOut(barToggle, "bar_toggle", false);
 
         padToggle = makeControl("PAD");
-        padToggle.setContentDescription("Show or hide the eight-direction pad");
+        padToggle.setContentDescription(
+                "Show or hide the eight-direction pad; hold and drag to move; "
+                        + "tap with three fingers to hide or restore all controls");
         padToggle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -880,10 +1319,12 @@ public final class TE4Activity extends SDLActivity {
                 }
             }
         });
+        attachDragHandle(padToggle, padToggle, "pad_toggle", false);
         FrameLayout.LayoutParams padToggleLayout = new FrameLayout.LayoutParams(
                 dp(56), height, Gravity.TOP | Gravity.START);
         padToggleLayout.leftMargin = dp(60);
         addContentView(padToggle, padToggleLayout);
+        restoreOverlayWhenLaidOut(padToggle, "pad_toggle", false);
 
         saveButton = makeControl("SAVE");
         saveButton.setContentDescription(
@@ -1707,6 +2148,7 @@ public final class TE4Activity extends SDLActivity {
             @Override
             public void run() {
                 if (installStatus != null) installStatus.setVisibility(View.GONE);
+                markGameDataReady();
             }
         });
     }
