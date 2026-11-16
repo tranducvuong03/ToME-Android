@@ -89,7 +89,7 @@ public final class TE4Activity extends SDLActivity {
     private static final String SAVE_SYNC_READY_MARKER = ".te4-save-sync-ready";
     private static final String SAVE_SYNC_ERROR_MARKER = ".te4-save-sync-error";
     private static final String GAME_ARCHIVE_UPDATE_MARKER =
-            ".te4-game-archives-update-v5";
+            ".te4-game-archives-update-v6";
 
     private HorizontalScrollView shortcutBar;
     private LinearLayout shortcutKeys;
@@ -1172,6 +1172,9 @@ public final class TE4Activity extends SDLActivity {
         replaceBundledAsset("game/modules/boot-te4-1.7.6.team",
                 new File(getFilesDir(), "game/modules/boot-te4-1.7.6.team"),
                 "boot-te4-1.7.6.team.tmp");
+        replaceBundledAsset("game/modules/tome-1.7.6.team",
+                new File(getFilesDir(), "game/modules/tome-1.7.6.team"),
+                "tome-1.7.6.team.tmp");
         replaceBundledAsset("game/profile-thread/init.lua",
                 new File(getFilesDir(), "game/profile-thread/init.lua"),
                 "profile-thread-init.lua.tmp");
