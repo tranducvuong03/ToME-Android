@@ -2,6 +2,9 @@
 
 Unofficial Android build and touch-control port for Tales of Maj'Eyal (T-Engine 4).
 
+> [!WARNING]
+> Please wait **10-20 seconds** for the game to fully load when entering the main menu.
+
 Upstream: https://te4.org/download
 
 <table>
