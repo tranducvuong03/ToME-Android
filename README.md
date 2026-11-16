@@ -1,4 +1,4 @@
-# tome-android-port
+# Tales of Maj'Eyal Android Port
 
 Unofficial Android build and touch-control port for Tales of Maj'Eyal (T-Engine 4).
 
