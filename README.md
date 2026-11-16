@@ -40,12 +40,14 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | `PAD` | Show or hide the eight-way pad; the visibility choice is saved. |
 | `⌨` | Show or hide the on-screen keyboard. |
 | `ESC`, `TAB`, `g`, `i`, `p`, `r` | Send the corresponding game key. |
+| Hold a fixed key without dragging | Show its assigned game action; fixed keys cannot be deleted. |
+| Shortcut bar | Shows up to 8 buttons at a time; swipe left or right to reach the rest. |
 | `BAR` | Show or hide the shortcut bar; hold and drag it to reposition it. |
 | `SAVE` | Open the save folder options; shown only in the main menu. |
 | `ADDONS` | Open the add-ons folder/import options; shown only in the main menu. |
 | Hold a built-in key on the shortcut bar, then drag | Reposition the shortcut bar. Release to save its position for future launches. |
 | `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches. |
-| Hold a custom shortcut | Show its action from the game's Key bindings; use **Delete shortcut** in the dialog to remove it. Built-in controls cannot be deleted. |
+| Hold a custom shortcut | Show its action from the game's Key bindings; use **Delete shortcut** in the dialog to remove it. |
 
 ## Add-ons on Android
 

@@ -814,7 +814,7 @@ static int sdl_surface_drawstring(lua_State *L)
 	int b = luaL_checknumber(L, 8);
 	bool alpha_from_texture = lua_toboolean(L, 9);
 
-	SDL_Color color = {r,g,b};
+	SDL_Color color = {r,g,b,255};
 	SDL_Surface *txt = TTF_RenderUTF8_Blended(*f, str, color);
 	if (txt)
 	{
@@ -839,7 +839,7 @@ static int sdl_surface_drawstring_aa(lua_State *L)
 	int b = luaL_checknumber(L, 8);
 	bool alpha_from_texture = lua_toboolean(L, 9);
 
-	SDL_Color color = {r,g,b};
+	SDL_Color color = {r,g,b,255};
 	SDL_Surface *txt = TTF_RenderUTF8_Blended(*f, str, color);
 	if (txt)
 	{
@@ -859,7 +859,7 @@ static int sdl_surface_drawstring_newsurface(lua_State *L)
 	int g = luaL_checknumber(L, 4);
 	int b = luaL_checknumber(L, 5);
 
-	SDL_Color color = {r,g,b};
+	SDL_Color color = {r,g,b,255};
 	SDL_Surface *txt = TTF_RenderUTF8_Blended(*f, str, color);
 	if (txt)
 	{
@@ -884,7 +884,7 @@ static int sdl_surface_drawstring_newsurface_aa(lua_State *L)
 	int g = luaL_checknumber(L, 4);
 	int b = luaL_checknumber(L, 5);
 
-	SDL_Color color = {r,g,b};
+	SDL_Color color = {r,g,b,255};
 	SDL_Surface *txt = TTF_RenderUTF8_Blended(*f, str, color);
 	if (txt)
 	{
@@ -1006,7 +1006,7 @@ static int sdl_font_draw(lua_State *L)
 	bool no_linefeed = lua_toboolean(L, 7);
 	bool direct_uid_draw = lua_toboolean(L, 8);
 	int h = font_needed_height(*f);
-	SDL_Color color = {r,g,b};
+	SDL_Color color = {r,g,b,255};
 
 	int fullmax = max_texture_size / 2;
 	if (fullmax < 1024) fullmax = 1024;
@@ -1308,7 +1308,7 @@ static int sdl_new_tile(lua_State *L)
 	int bb = luaL_checknumber(L, 12);
 	int alpha = luaL_checknumber(L, 13);
 
-	SDL_Color color = {r,g,b};
+	SDL_Color color = {r,g,b,255};
 	SDL_Surface *txt = TTF_RenderUTF8_Blended(*f, str, color);
 
 	SDL_Surface **s = (SDL_Surface**)lua_newuserdata(L, sizeof(SDL_Surface*));

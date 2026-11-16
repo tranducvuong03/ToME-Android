@@ -1260,15 +1260,15 @@ public final class TE4Activity extends SDLActivity {
         renderCustomShortcuts();
 
         FrameLayout.LayoutParams barLayout = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, height, Gravity.BOTTOM | Gravity.END);
+                getShortcutBarWidth(), height, Gravity.BOTTOM | Gravity.END);
         barLayout.leftMargin = dp(146);
         barLayout.rightMargin = dp(4);
         barLayout.bottomMargin = dp(5);
         addContentView(shortcutBar, barLayout);
-        restoreOverlayWhenLaidOut(shortcutBar, "shortcut_bar", true);
-        attachDragHandle(shortcutBar, shortcutBar, "shortcut_bar", true);
+        restoreOverlayWhenLaidOut(shortcutBar, "shortcut_bar", false);
+        attachDragHandle(shortcutBar, shortcutBar, "shortcut_bar", false, true);
         shortcutBar.setContentDescription(
-                "Shortcut bar; hold a built-in key or blank area to move the bar");
+                "Shortcut bar; swipe horizontally to scroll; hold a built-in key to move the bar");
 
         directionPad = new DirectionPadView(this);
         directionPad.setVisibility(getSharedPreferences("te4_controls", MODE_PRIVATE)
@@ -1297,7 +1297,7 @@ public final class TE4Activity extends SDLActivity {
                         ? View.GONE : View.VISIBLE);
             }
         });
-        attachDragHandle(barToggle, barToggle, "bar_toggle", false);
+        attachDragHandle(barToggle, barToggle, "bar_toggle", false, false);
         barToggle.setContentDescription("Show or hide the shortcut bar; hold and drag to move");
         FrameLayout.LayoutParams toggleLayout = new FrameLayout.LayoutParams(
                 dp(56), height, Gravity.TOP | Gravity.START);
@@ -1319,7 +1319,7 @@ public final class TE4Activity extends SDLActivity {
                 }
             }
         });
-        attachDragHandle(padToggle, padToggle, "pad_toggle", false);
+        attachDragHandle(padToggle, padToggle, "pad_toggle", false, false);
         FrameLayout.LayoutParams padToggleLayout = new FrameLayout.LayoutParams(
                 dp(56), height, Gravity.TOP | Gravity.START);
         padToggleLayout.leftMargin = dp(60);
@@ -1379,7 +1379,19 @@ public final class TE4Activity extends SDLActivity {
                 }
             }
         });
-        attachDragHandle(control, shortcutBar, "shortcut_bar", true);
+        Runnable showAction = null;
+        if (!keyboard) {
+            final Shortcut shortcut = new Shortcut(label, keycode);
+            control.setContentDescription(
+                    "Send " + label + "; hold to view its game action; cannot be deleted");
+            showAction = new Runnable() {
+                @Override
+                public void run() {
+                    showShortcutInfo(shortcut, false);
+                }
+            };
+        }
+        attachDragHandle(control, shortcutBar, "shortcut_bar", false, true, showAction);
     }
 
     private void renderCustomShortcuts() {
@@ -1425,12 +1437,47 @@ public final class TE4Activity extends SDLActivity {
                 showAddShortcutDialog();
             }
         });
+        updateShortcutBarWidth();
+    }
+
+    private int getShortcutBarWidth() {
+        int visibleControls = Math.min(8, shortcutKeys.getChildCount());
+        int width = 0;
+        for (int i = 0; i < visibleControls; i++) {
+            View child = shortcutKeys.getChildAt(i);
+            LinearLayout.LayoutParams params =
+                    (LinearLayout.LayoutParams) child.getLayoutParams();
+            width += params.width + params.leftMargin + params.rightMargin;
+        }
+        int availableWidth = Math.max(dp(120),
+                getResources().getDisplayMetrics().widthPixels - dp(150));
+        return Math.min(width, availableWidth);
+    }
+
+    private void updateShortcutBarWidth() {
+        if (shortcutBar == null) return;
+        ViewGroup.LayoutParams current = shortcutBar.getLayoutParams();
+        if (!(current instanceof FrameLayout.LayoutParams)) return;
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) current;
+        int width = getShortcutBarWidth();
+        if (params.width != width) {
+            params.width = width;
+            shortcutBar.setLayoutParams(params);
+        }
     }
 
     private void attachDragHandle(View handle, View target, String preferenceKey,
-            boolean expandToRight) {
+            boolean expandToRight, boolean allowParentScroll) {
+        attachDragHandle(handle, target, preferenceKey, expandToRight,
+                allowParentScroll, null);
+    }
+
+    private void attachDragHandle(View handle, View target, String preferenceKey,
+            boolean expandToRight, boolean allowParentScroll, Runnable longPressAction) {
         handle.setOnTouchListener(
-                new OverlayDragListener(handle, target, preferenceKey, expandToRight));
+                new OverlayDragListener(
+                        handle, target, preferenceKey, expandToRight,
+                        allowParentScroll, longPressAction));
     }
 
     private void restoreOverlayWhenLaidOut(final View target, final String preferenceKey,
@@ -1512,6 +1559,8 @@ public final class TE4Activity extends SDLActivity {
         private final View target;
         private final String preferenceKey;
         private final boolean expandToRight;
+        private final boolean allowParentScroll;
+        private final Runnable longPressAction;
         private final Handler handler = new Handler(Looper.getMainLooper());
         private boolean pointerDown;
         private boolean longPressReached;
@@ -1530,11 +1579,13 @@ public final class TE4Activity extends SDLActivity {
         };
 
         OverlayDragListener(View handle, View target, String preferenceKey,
-                boolean expandToRight) {
+                boolean expandToRight, boolean allowParentScroll, Runnable longPressAction) {
             this.handle = handle;
             this.target = target;
             this.preferenceKey = preferenceKey;
             this.expandToRight = expandToRight;
+            this.allowParentScroll = allowParentScroll;
+            this.longPressAction = longPressAction;
         }
 
         @Override
@@ -1549,7 +1600,7 @@ public final class TE4Activity extends SDLActivity {
                     longPressReached = false;
                     dragging = false;
                     handler.postDelayed(startDragging, ViewConfiguration.getLongPressTimeout());
-                    return true;
+                    return !allowParentScroll;
                 case MotionEvent.ACTION_MOVE:
                     if (longPressReached) {
                         dragging = true;
@@ -1561,24 +1612,32 @@ public final class TE4Activity extends SDLActivity {
                                 event.getRawX() - parentLocation[0] - dragOffsetX,
                                 event.getRawY() - parentLocation[1] - dragOffsetY,
                                 expandToRight);
+                        return true;
                     }
-                    return true;
-                case MotionEvent.ACTION_UP:
+                    return !allowParentScroll;
+                case MotionEvent.ACTION_UP: {
                     handler.removeCallbacks(startDragging);
                     if (dragging) {
                         saveOverlayPosition(target, preferenceKey, expandToRight);
-                    } else if (!longPressReached) {
+                    } else if (!longPressReached && !allowParentScroll) {
                         handle.performClick();
                     }
+                    boolean showInfo = longPressReached && !dragging
+                            && longPressAction != null;
+                    boolean consume = !allowParentScroll || longPressReached || dragging;
                     reset();
-                    return true;
-                case MotionEvent.ACTION_CANCEL:
+                    if (showInfo) longPressAction.run();
+                    return consume;
+                }
+                case MotionEvent.ACTION_CANCEL: {
                     handler.removeCallbacks(startDragging);
                     if (dragging) saveOverlayPosition(target, preferenceKey, expandToRight);
+                    boolean consumeCancel = !allowParentScroll || longPressReached || dragging;
                     reset();
-                    return true;
+                    return consumeCancel;
+                }
                 default:
-                    return true;
+                    return !allowParentScroll;
             }
         }
 
@@ -1653,6 +1712,10 @@ public final class TE4Activity extends SDLActivity {
     }
 
     private void showShortcutInfo(final Shortcut shortcut) {
+        showShortcutInfo(shortcut, true);
+    }
+
+    private void showShortcutInfo(final Shortcut shortcut, boolean allowDelete) {
         String action;
         try {
             action = findShortcutActions(shortcut.keycode);
@@ -1670,17 +1733,19 @@ public final class TE4Activity extends SDLActivity {
             message = "Assigned action(s): " + action;
         }
 
-        new AlertDialog.Builder(this)
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
                 .setTitle("Shortcut " + shortcut.label)
                 .setMessage(message)
-                .setNegativeButton("Close", null)
-                .setPositiveButton("Delete shortcut", new DialogInterface.OnClickListener() {
+                .setNegativeButton("Close", null);
+        if (allowDelete) {
+            dialog.setPositiveButton("Delete shortcut", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         deleteShortcut(shortcut);
                     }
-                })
-                .show();
+                });
+        }
+        dialog.show();
     }
 
     private void deleteShortcut(Shortcut shortcut) {
