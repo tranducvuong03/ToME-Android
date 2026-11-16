@@ -52,7 +52,7 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 ## Add-ons
 
 1. **Setup:** Select `Download/Tales of Maj'Eyal` (or any folder) on first launch, or later via the **ADDONS** menu. The app will create an `addons` subfolder inside.
-2. **Install:** Put `.teaa` or `.teaac` files into `Download/Tales of Maj'Eyal/addons` (or any folder with `addons` inside), open game → tap **ADDONS** → **Import Add-ons**, and restart the game.
+2. **Install:** Put `.teaa` or `.teaac` files into `Download/Tales of Maj'Eyal/addons` (or folder you choose with `addons` inside), open game → tap **ADDONS** → **Import Add-ons**, and restart the game.
 
 ## Game Saves
 
