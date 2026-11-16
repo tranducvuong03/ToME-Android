@@ -2,6 +2,20 @@
 
 Unofficial Android build and touch-control port for Tales of Maj'Eyal (T-Engine 4).
 
+<table>
+  <tr>
+    <td width="33.33%">
+      <img src="https://github.com/user-attachments/assets/899df79c-0641-4709-8251-75a1c4865cbf" alt="Screenshot 1" />
+    </td>
+    <td width="33.33%">
+      <img src="https://github.com/user-attachments/assets/04601cb6-f765-4ad6-807e-819ded627e55" alt="Screenshot 2" />
+    </td>
+    <td width="33.33%">
+      <img src="https://github.com/user-attachments/assets/4f731213-f625-4d9c-a811-0cfc2ecb48b5" alt="Screenshot 3" />
+    </td>
+  </tr>
+</table>
+
 ## Android build
 
 The GitHub Actions workflow in `.github/workflows/android.yml` builds an arm64
