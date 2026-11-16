@@ -23,7 +23,7 @@ Upstream: https://te4.org/download
 
 ## Download
 
-Release: https://github.com/tranducvuong03/tome-android-port/releases/tag/1.7.6
+Download the latest build here: <a href="https://github.com/tranducvuong03/tome-android-port/releases/tag/1.7.6">Release</a>
 
 ## Android controls
 
