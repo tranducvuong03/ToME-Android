@@ -21,16 +21,6 @@ Upstream: https://te4.org/download
   </tr>
 </table>
 
-## Android build
-
-The GitHub Actions workflow in `.github/workflows/android.yml` builds an arm64
-debug APK. Run it from the Actions tab with **Android** → **Run workflow**, or
-push a change to one of the paths watched by the workflow.
-
-On Android 10 and newer, native output is written to
-`Download/Tales of Maj'Eyal/te4_log.txt`. The log is replaced on each launch.
-Game data remains in the app's private storage.
-
 ## Android controls
 
 The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal:
@@ -61,6 +51,16 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 
 1. **Auto-Sync:** Saves automatically back up to the `save` subfolder when returning to the main menu, and restore when the game starts.
 2. **Manual:** Copy old character files into `save` to restore them. Use **SAVE** → **Import Saves** (to load immediately) or **Back Up Now** (to force a backup).
+
+## Android build
+
+The GitHub Actions workflow in `.github/workflows/android.yml` builds an arm64
+debug APK. Run it from the Actions tab with **Android** → **Run workflow**, or
+push a change to one of the paths watched by the workflow.
+
+On Android 10 and newer, native output is written to
+`Download/Tales of Maj'Eyal/te4_log.txt`. The log is replaced on each launch.
+Game data remains in the app's private storage.
 
 ## Licensing
 
