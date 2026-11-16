@@ -49,8 +49,6 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 | `+` | Type and save a one-character shortcut using the on-screen keyboard. Saved shortcuts persist between launches. |
 | Hold a custom shortcut | Show its action from the game's Key bindings; use **Delete shortcut** in the dialog to remove it. |
 
-On startup, a loading screen blocks input until game initialization is complete and the first menu frame has rendered.
-
 ## Add-ons
 
 1. **Setup:** Select `Download/Tales of Maj'Eyal` (or any folder) on first launch, or later via the **ADDONS** menu. The app will create an `addons` subfolder inside.

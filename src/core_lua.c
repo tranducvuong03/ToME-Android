@@ -429,10 +429,17 @@ static int lua_flush_key_events(lua_State *L)
 	return 0;
 }
 
+#ifdef __ANDROID__
+extern void TE4AndroidShowTextInput(void);
+#endif
 static int lua_key_unicode(lua_State *L)
 {
-	if (lua_isboolean(L, 1) && lua_toboolean(L, 1)) SDL_StartTextInput();
-	else SDL_StopTextInput();
+	if (lua_isboolean(L, 1) && lua_toboolean(L, 1)) {
+		SDL_StartTextInput();
+#ifdef __ANDROID__
+		TE4AndroidShowTextInput();
+#endif
+	} else SDL_StopTextInput();
 	return 0;
 }
 
@@ -481,7 +488,6 @@ static const struct luaL_Reg keylib[] =
 extern int current_game;
 #ifdef __ANDROID__
 extern void TE4AndroidSetDlcButtonVisible(int visible);
-extern void TE4AndroidSetStartupUiReady(void);
 #endif
 static int lua_set_current_game(lua_State *L)
 {
@@ -499,15 +505,6 @@ static int lua_set_dlc_button_visible(lua_State *L)
 {
 #ifdef __ANDROID__
 	TE4AndroidSetDlcButtonVisible(lua_toboolean(L, 1));
-#else
-	(void)L;
-#endif
-	return 0;
-}
-static int lua_set_startup_ui_ready(lua_State *L)
-{
-#ifdef __ANDROID__
-	TE4AndroidSetStartupUiReady();
 #else
 	(void)L;
 #endif
@@ -673,7 +670,6 @@ static const struct luaL_Reg gamelib[] =
 	{"reboot", lua_reboot_lua},
 	{"set_current_game", lua_set_current_game},
 	{"setDlcButtonVisible", lua_set_dlc_button_visible},
-	{"setStartupUiReady", lua_set_startup_ui_ready},
 	{"exit_engine", lua_exit_engine},
 	{"getTime", lua_get_time},
 	{"getFrameTime", lua_get_frame_time},

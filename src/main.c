@@ -49,7 +49,6 @@
 #include <SDL_system.h>
 #include <unistd.h>
 #include <gl4esinit.h>
-extern void TE4AndroidNotifyRenderedFrame(void);
 #endif
 #ifdef SELFEXE_WINDOWS
 #include <windows.h>
@@ -773,10 +772,6 @@ void on_redraw()
 		SDL_GL_SwapWindow(window);
 		break;
 	}
-
-#ifdef __ANDROID__
-	TE4AndroidNotifyRenderedFrame();
-#endif
 
 	last_keyframe = nb;
 
