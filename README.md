@@ -56,7 +56,7 @@ Upstream: https://te4.org/download
 
 ## Android build
 
-Run it from the Actions tab with **Android** → **Run workflow**
+> Run it from the Actions tab with **Android** → **Run workflow**
 
 ## Licensing
 
