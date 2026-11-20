@@ -21,13 +21,11 @@ Upstream: https://te4.org/download
   </tr>
 </table>
 
-## Download
+## Installing
 
-Download the latest build here: <a href="https://github.com/tranducvuong03/tome-android-port/releases/tag/1.7.6">Release</a>
+> Download the latest build here: <a href="https://github.com/tranducvuong03/tome-android-port/releases/tag/1.7.6">Release</a>
 
 ## Controls
-
-The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal:
 
 | Control | Effect |
 |---|---|
@@ -58,13 +56,7 @@ The game runs in landscape. The touch controls are tailored to Tales of Maj'Eyal
 
 ## Android build
 
-The GitHub Actions workflow in `.github/workflows/android.yml` builds an arm64
-debug APK. Run it from the Actions tab with **Android** → **Run workflow**, or
-push a change to one of the paths watched by the workflow.
-
-On Android 10 and newer, native output is written to
-`Download/Tales of Maj'Eyal/te4_log.txt`. The log is replaced on each launch.
-Game data remains in the app's private storage.
+Run it from the Actions tab with **Android** → **Run workflow**
 
 ## Licensing
 
